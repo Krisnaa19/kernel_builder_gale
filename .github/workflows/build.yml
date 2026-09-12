@@ -40,9 +40,10 @@ jobs:
               f.write(data)
           '
 
-          # 3. Lumpuhkan langsung kompilasi lockdep.o di Makefile (solusi tuntas)
+          # 3. Lumpuhkan lockdep & ssg-iosched langsung di Makefile
           sed -i 's/obj-$(CONFIG_LOCKDEP) += lockdep.o/# obj-$(CONFIG_LOCKDEP) += lockdep.o/g' kernel/locking/Makefile || true
           sed -i 's/obj-y += lockdep.o/# obj-y += lockdep.o/g' kernel/locking/Makefile || true
+          sed -i 's/obj-$(CONFIG_IOSCHED_SSG) += ssg-iosched.o/# obj-$(CONFIG_IOSCHED_SSG) += ssg-iosched.o/g' block/Makefile || true
 
           DEFCONFIG=$(find arch/arm64/configs/ -name "*gale*defconfig" | head -n 1)
           if [ -z "$DEFCONFIG" ]; then
@@ -50,15 +51,17 @@ jobs:
           fi
           echo "Using defconfig: $DEFCONFIG"
           
-          # Matikan flag debugging di defconfig
+          # Matikan flag debugging & ssg iosched di defconfig
           sed -i '/CONFIG_LOCKDEP/d' $DEFCONFIG
           sed -i '/CONFIG_PROVE_LOCKING/d' $DEFCONFIG
           sed -i '/CONFIG_DEBUG_LOCK_ALLOC/d' $DEFCONFIG
+          sed -i '/CONFIG_IOSCHED_SSG/d' $DEFCONFIG
           echo "# CONFIG_LOCKDEP is not set" >> $DEFCONFIG
           echo "# CONFIG_PROVE_LOCKING is not set" >> $DEFCONFIG
           echo "# CONFIG_DEBUG_LOCK_ALLOC is not set" >> $DEFCONFIG
+          echo "# CONFIG_IOSCHED_SSG is not set" >> $DEFCONFIG
 
-          # Flag KernelSU
+          # Fitur ReSukiSU & Kprobes
           echo "CONFIG_KSU=y" >> $DEFCONFIG
           echo "CONFIG_KPROBES=y" >> $DEFCONFIG
           echo "CONFIG_HAVE_KPROBES=y" >> $DEFCONFIG
@@ -81,10 +84,11 @@ jobs:
           
           make O=out ARCH=arm64 $DEFCONFIG_NAME
 
-          # Lumpuhkan juga lockdep jika dipaksa hidup di file konfigurasi hasil generate
+          # Pastikan flag mati di out/.config
           sed -i 's/CONFIG_LOCKDEP=y/# CONFIG_LOCKDEP is not set/g' out/.config || true
           sed -i 's/CONFIG_PROVE_LOCKING=y/# CONFIG_PROVE_LOCKING is not set/g' out/.config || true
           sed -i 's/CONFIG_DEBUG_LOCK_ALLOC=y/# CONFIG_DEBUG_LOCK_ALLOC is not set/g' out/.config || true
+          sed -i 's/CONFIG_IOSCHED_SSG=y/# CONFIG_IOSCHED_SSG is not set/g' out/.config || true
           
           make -j$(nproc --all) O=out \
             ARCH=arm64 \
