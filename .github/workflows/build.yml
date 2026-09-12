@@ -23,28 +23,22 @@ jobs:
         run: |
           git clone https://github.com/xxblebleblexx/android_kernel_xiaomi_gale.git --depth=1 kernel-source
 
-      - name: Integrate ReSukiSU
+      - name: Setup Kernel Config
         run: |
           cd kernel-source
-          # Integrasi ReSukiSU langsung ke direktori drivers/kernelsu
-          rm -rf drivers/kernelsu
-          git clone https://github.com/rsuntk/ReSukiSU.git --depth=1 drivers/kernelsu
-          
-          # Tambahkan entry ke drivers/Makefile jika belum ada
-          if ! grep -q "kernelsu" drivers/Makefile; then
-            echo "obj-y += kernelsu/" >> drivers/Makefile
-          fi
           
           DEFCONFIG=$(find arch/arm64/configs/ -name "*gale*defconfig" | head -n 1)
           if [ -z "$DEFCONFIG" ]; then
             DEFCONFIG="arch/arm64/configs/gale_defconfig"
           fi
-          echo "Using defconfig: $DEFCONFIG"
+          echo "Menggunakan defconfig: $DEFCONFIG"
           
+          # Aktifkan konfigurasi KSU dan Kprobes
           echo "CONFIG_KSU=y" >> $DEFCONFIG
           echo "CONFIG_KPROBES=y" >> $DEFCONFIG
           echo "CONFIG_HAVE_KPROBES=y" >> $DEFCONFIG
           echo "CONFIG_KPROBE_EVENTS=y" >> $DEFCONFIG
+          echo "CONFIG_OVERLAY_FS=y" >> $DEFCONFIG
 
       - name: Compile Kernel
         run: |
@@ -81,10 +75,10 @@ jobs:
           fi
           
           cd ak3
-          zip -r9 ../Kernel-Redmi13C-zauksk-ReSukiSU.zip * -x .git README.md *placeholder
+          zip -r9 ../Kernel-Redmi13C-zauksk.zip * -x .git README.md *placeholder
 
       - name: Upload Kernel Zip
         uses: actions/upload-artifact@v4
         with:
-          name: Kernel-Redmi13C-zauksk-ReSukiSU
-          path: Kernel-Redmi13C-zauksk-ReSukiSU.zip
+          name: Kernel-Redmi13C-zauksk
+          path: Kernel-Redmi13C-zauksk.zip
