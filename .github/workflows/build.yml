@@ -5,15 +5,17 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
+    runs-on: ubuntu-latest
+    container:
+      image: ubuntu:20.04
 
-      - name: Setup Build Environment
+    steps:
+      - name: Setup Build Environment (Ubuntu 20.04 Native GCC 9)
+        env:
+          DEBIAN_FRONTEND: noninteractive
         run: |
-          sudo apt-get update
-          sudo apt-get install -y git ccache automake flex lzop bison gperf build-essential zip curl zlib1g-dev libncurses5-dev libssl-dev bc liblz4-tool libelf-dev python3 gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu gcc-arm-linux-gnueabi binutils-arm-linux-gnueabi
+          apt-get update
+          apt-get install -y git curl zip bc bison flex build-essential libssl-dev libelf-dev libncurses-dev ccache python3 gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu gcc-arm-linux-gnueabi binutils-arm-linux-gnueabi
 
       - name: Download AOSP Clang (r383902)
         run: |
@@ -27,14 +29,9 @@ jobs:
           git clone https://github.com/Mayuri-Chan/android_kernel_xiaomi_gale.git --depth=1 kernel-source || \
           git clone https://github.com/wulan17/android_kernel_xiaomi_gale.git --depth=1 kernel-source
 
-      - name: Patch DTC Parser & Inject ReSukiSU
+      - name: Inject ReSukiSU & Setup Defconfig
         run: |
           cd kernel-source
-
-          # Fix mutlak multiple definition of yylloc pada semua file DTC
-          sed -i 's/^YYLTYPE yylloc;/extern YYLTYPE yylloc;/' scripts/dtc/dtc-lexer.l 2>/dev/null || true
-          sed -i 's/^YYLTYPE yylloc;/extern YYLTYPE yylloc;/' scripts/dtc/dtc-lexer.lex.c 2>/dev/null || true
-          sed -i 's/^YYLTYPE yylloc;/extern YYLTYPE yylloc;/' scripts/dtc/dtc-lexer.lex.c_shipped 2>/dev/null || true
 
           # Injeksi ReSukiSU khusus 4.19 (Non-GKI)
           curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash -s legacy || \
@@ -62,13 +59,11 @@ jobs:
           export KBUILD_BUILD_USER="zauksk"
           export KBUILD_BUILD_HOST="Builder"
 
-          # 1. Konfigurasi defconfig
+          # 1. Defconfig
           make O=out ARCH=arm64 \
             CC=clang \
             CROSS_COMPILE=aarch64-linux-gnu- \
             CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
-            HOSTCFLAGS="-O2 -fcommon" \
-            HOSTLDFLAGS="-fcommon" \
             $DEFCONFIG_NAME
 
           # 2. Kompilasi kernel zauksk++
@@ -79,8 +74,6 @@ jobs:
             CLANG_TRIPLE=aarch64-linux-gnu- \
             CROSS_COMPILE=aarch64-linux-gnu- \
             CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
-            HOSTCFLAGS="-O2 -fcommon" \
-            HOSTLDFLAGS="-fcommon" \
             KCFLAGS="-w" \
             KCPPFLAGS="-w"
 
