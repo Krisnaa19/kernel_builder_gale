@@ -55,7 +55,6 @@ jobs:
           fi
           echo "Using defconfig: $DEFCONFIG"
           
-          # Bersihkan konfigurasi bermasalah
           sed -i '/CONFIG_LOCKDEP/d' $DEFCONFIG
           sed -i '/CONFIG_PROVE_LOCKING/d' $DEFCONFIG
           sed -i '/CONFIG_DEBUG_LOCK_ALLOC/d' $DEFCONFIG
@@ -65,7 +64,6 @@ jobs:
           echo "# CONFIG_DEBUG_LOCK_ALLOC is not set" >> $DEFCONFIG
           echo "# CONFIG_IOSCHED_SSG is not set" >> $DEFCONFIG
 
-          # Flag KernelSU
           echo "CONFIG_KSU=y" >> $DEFCONFIG
           echo "CONFIG_KPROBES=y" >> $DEFCONFIG
           echo "CONFIG_HAVE_KPROBES=y" >> $DEFCONFIG
@@ -88,24 +86,29 @@ jobs:
           
           make O=out ARCH=arm64 $DEFCONFIG_NAME
 
-          # Pastikan flag mati di out/.config
           sed -i 's/CONFIG_LOCKDEP=y/# CONFIG_LOCKDEP is not set/g' out/.config || true
           sed -i 's/CONFIG_PROVE_LOCKING=y/# CONFIG_PROVE_LOCKING is not set/g' out/.config || true
           sed -i 's/CONFIG_DEBUG_LOCK_ALLOC=y/# CONFIG_DEBUG_LOCK_ALLOC is not set/g' out/.config || true
           sed -i 's/CONFIG_IOSCHED_SSG=y/# CONFIG_IOSCHED_SSG is not set/g' out/.config || true
           
-          # Build dan cetak error otomatis di paling bawah jika gagal
           make -j$(nproc --all) O=out \
             ARCH=arm64 \
             LOCALVERSION="-zauksk" \
             CC=clang \
             CROSS_COMPILE=aarch64-linux-gnu- \
-            CROSS_COMPILE_ARM32=arm-linux-gnueabi- 2>&1 | tee build.log || {
-              echo "=================== ERROR LOG TERAKHIR ==================="
-              grep -B 3 -A 5 -E "error:|Error [0-9]" build.log | tail -n 40
-              echo "=========================================================="
-              exit 1
-            }
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi- Image.gz-dtb || \
+          make -j$(nproc --all) O=out \
+            ARCH=arm64 \
+            LOCALVERSION="-zauksk" \
+            CC=clang \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi- Image.gz || \
+          make -j$(nproc --all) O=out \
+            ARCH=arm64 \
+            LOCALVERSION="-zauksk" \
+            CC=clang \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi- Image
 
       - name: Package with AnyKernel3
         run: |
@@ -116,13 +119,17 @@ jobs:
           sed -i 's|block=.*|block=/dev/block/by-name/boot|g' ak3/anykernel.sh
           sed -i 's/is_slot_device=.*/is_slot_device=auto/g' ak3/anykernel.sh
           
-          IMAGE_FILE=$(find kernel-source/out/arch/arm64/boot/ -type f \( -name "Image.gz-dtb" -o -name "Image.gz" -o -name "Image" \) | head -n 1)
-          if [ -n "$IMAGE_FILE" ]; then
-            cp "$IMAGE_FILE" ak3/$(basename "$IMAGE_FILE")
-          else
+          # Cari file Image hasil build di seluruh workspace tanpa batasan path kaku
+          IMAGE_FILE=$(find kernel-source/ -type f \( -name "Image.gz-dtb" -o -name "Image.gz" -o -name "Image" \) | head -n 1)
+          
+          if [ -z "$IMAGE_FILE" ]; then
             echo "Error: File kernel Image tidak ditemukan!"
+            find kernel-source/ -name "*Image*"
             exit 1
           fi
+          
+          echo "Ditemukan kernel Image: $IMAGE_FILE"
+          cp "$IMAGE_FILE" ak3/$(basename "$IMAGE_FILE")
           
           cd ak3
           zip -r9 ../Kernel-Redmi13C-zauksk-ReSukiSU.zip * -x .git README.md *placeholder
