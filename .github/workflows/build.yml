@@ -1,4 +1,4 @@
-name: Build Redmi 13C Kernel - zauksk++
+name: Build Redmi 13C Kernel - zauksk++ ReSukiSU
 
 on:
   workflow_dispatch:
@@ -22,24 +22,34 @@ jobs:
           tar -xzf clang.tar.gz -C clang
           rm -f clang.tar.gz
 
-      - name: Clone Kernel Source
+      - name: Clone Tree Wulan
         run: |
-          git clone https://github.com/Mayuri-Chan/android_kernel_xiaomi_gale.git -b lineage-21-ksu --depth=1 kernel-source || \
-          git clone https://github.com/wulan17/android_kernel_xiaomi_gale.git -b lineage-21-ksu --depth=1 kernel-source || \
-          git clone https://github.com/Mayuri-Chan/android_kernel_xiaomi_gale.git --depth=1 kernel-source
+          git clone https://github.com/Mayuri-Chan/android_kernel_xiaomi_gale.git --depth=1 kernel-source || \
+          git clone https://github.com/wulan17/android_kernel_xiaomi_gale.git --depth=1 kernel-source
 
-      - name: Setup Defconfig
+      - name: Setup DTC Fix & Inject ReSukiSU (Non-GKI 4.19)
         run: |
           cd kernel-source
+
+          # Fix bug parser Device Tree Compiler (DTC) di Ubuntu 22.04
+          sed -i 's/^YYLTYPE yylloc;/extern YYLTYPE yylloc;/' scripts/dtc/dtc-lexer.l 2>/dev/null || true
+          sed -i 's/^YYLTYPE yylloc;/extern YYLTYPE yylloc;/' scripts/dtc/dtc-lexer.lex.c_shipped 2>/dev/null || true
+
+          # Injeksi ReSukiSU khusus 4.19 (Non-GKI)
+          curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash -s legacy || \
+          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5
+
           DEFCONFIG=$(find arch/arm64/configs/ -name "*gale*defconfig" | head -n 1)
           if [ -z "$DEFCONFIG" ]; then
             DEFCONFIG="arch/arm64/configs/gale_defconfig"
           fi
-          echo "Using defconfig: $DEFCONFIG"
           echo "DEFCONFIG_NAME=$(basename $DEFCONFIG)" >> $GITHUB_ENV
 
-          # Aktifkan konfigurasi KSU bawaan
+          # Aktifkan konfigurasi root
           echo "CONFIG_KSU=y" >> $DEFCONFIG
+          echo "CONFIG_KPROBES=y" >> $DEFCONFIG
+          echo "CONFIG_HAVE_KPROBES=y" >> $DEFCONFIG
+          echo "CONFIG_KPROBE_EVENTS=y" >> $DEFCONFIG
           echo "CONFIG_OVERLAY_FS=y" >> $DEFCONFIG
 
       - name: Compile Kernel
@@ -50,11 +60,16 @@ jobs:
           export SUBARCH=arm64
           export KBUILD_BUILD_USER="zauksk"
           export KBUILD_BUILD_HOST="Builder"
-          
-          # Konfigurasi defconfig menggunakan compiler aarch64-linux-gnu-
-          make O=out ARCH=arm64 CC=clang CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- $DEFCONFIG_NAME
-          
-          # Kompilasi kernel murni zauksk++
+
+          # 1. Konfigurasi defconfig
+          make O=out ARCH=arm64 \
+            CC=clang \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            HOSTCFLAGS="-fcommon" \
+            $DEFCONFIG_NAME
+
+          # 2. Kompilasi kernel zauksk++
           make -j$(nproc --all) O=out \
             ARCH=arm64 \
             LOCALVERSION="-zauksk++" \
@@ -62,28 +77,27 @@ jobs:
             CLANG_TRIPLE=aarch64-linux-gnu- \
             CROSS_COMPILE=aarch64-linux-gnu- \
             CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            HOSTCFLAGS="-fcommon" \
             KCFLAGS="-w" \
             KCPPFLAGS="-w"
 
       - name: Package with AnyKernel3
         run: |
           git clone https://github.com/osm0sis/AnyKernel3.git --depth=1 ak3
-          
+
           sed -i 's/device.name1=.*/device.name1=gale/g' ak3/anykernel.sh
           sed -i 's/device.name2=.*/device.name2=gust/g' ak3/anykernel.sh
           sed -i 's|block=.*|block=/dev/block/by-name/boot|g' ak3/anykernel.sh
           sed -i 's/is_slot_device=.*/is_slot_device=auto/g' ak3/anykernel.sh
-          
+
           IMAGE_FILE=$(find kernel-source/out/arch/arm64/boot/ -type f \( -name "Image.gz-dtb" -o -name "Image.gz" -o -name "Image" \) | head -n 1)
-          
+
           if [ -z "$IMAGE_FILE" ]; then
             echo "Kernel Image tidak ditemukan!"
             exit 1
           fi
-          
-          echo "Ditemukan output Image: $IMAGE_FILE"
+
           cp "$IMAGE_FILE" ak3/$(basename "$IMAGE_FILE")
-          
           cd ak3
           zip -r9 ../Kernel-Redmi13C-zauksk++.zip * -x .git README.md *placeholder
 
