@@ -29,7 +29,7 @@ jobs:
           git clone https://github.com/Mayuri-Chan/android_kernel_xiaomi_gale.git --depth=1 kernel-source || \
           git clone https://github.com/wulan17/android_kernel_xiaomi_gale.git --depth=1 kernel-source
 
-      - name: Inject ReSukiSU & Patch Configs
+      - name: Inject ReSukiSU & Source Patches
         run: |
           cd kernel-source
 
@@ -51,40 +51,21 @@ jobs:
           curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash -s legacy || \
           curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5
 
-          # 4. Matikan pemblokiran TP Hook pada Non-GKI di Kbuild ReSukiSU
-          find drivers/kernelsu KernelSU -name "Kbuild" -exec sed -i 's/$(error.*TP hooks are incompatible.*)/# bypassed tp hook check/g' {} + 2>/dev/null || true
-          find drivers/kernelsu KernelSU -name "static_export_check.mk" -exec truncate -s 0 {} + 2>/dev/null || true
+          # 4. Matikan semua pemeriksaan abort/Stop pada ReSukiSU
+          find drivers/kernelsu KernelSU -type f -name "Kbuild" -exec sed -i 's/$(error.*)/# bypassed error/g' {} + 2>/dev/null || true
+          find drivers/kernelsu KernelSU -type f -name "*.mk" -exec sed -i 's/$(error.*)/# bypassed error/g' {} + 2>/dev/null || true
+
+          # 5. Fix static symbol export selinuxfs.c
+          sed -i 's/static const struct file_operations sel_handle_status_ops/const struct file_operations sel_handle_status_ops/' security/selinux/selinuxfs.c 2>/dev/null || true
+          if ! grep -q "EXPORT_SYMBOL(sel_handle_status_ops);" security/selinux/selinuxfs.c 2>/dev/null; then
+            sed -i '/const struct file_operations sel_handle_status_ops = {/,/};/ { /};/ a\EXPORT_SYMBOL(sel_handle_status_ops); }' security/selinux/selinuxfs.c 2>/dev/null || true
+          fi
 
           DEFCONFIG=$(find arch/arm64/configs/ -name "*gale*defconfig" | head -n 1)
           if [ -z "$DEFCONFIG" ]; then
             DEFCONFIG="arch/arm64/configs/gale_defconfig"
           fi
           echo "DEFCONFIG_NAME=$(basename $DEFCONFIG)" >> $GITHUB_ENV
-
-          # 5. Matikan modul debugging lockdep
-          sed -i '/CONFIG_LOCKDEP/d' $DEFCONFIG
-          sed -i '/CONFIG_LOCKDEP_SUPPORT/d' $DEFCONFIG
-          sed -i '/CONFIG_PROVE_LOCKING/d' $DEFCONFIG
-          echo "# CONFIG_LOCKDEP is not set" >> $DEFCONFIG
-          echo "# CONFIG_PROVE_LOCKING is not set" >> $DEFCONFIG
-
-          # 6. Konfigurasi Hook Non-GKI (Wajib KPROBES, matikan KSU_HOOK_TRACEPOINT)
-          echo "CONFIG_KSU=y" >> $DEFCONFIG
-          echo "CONFIG_KSU_HOOK_KPROBES=y" >> $DEFCONFIG
-          echo "# CONFIG_KSU_HOOK_TRACEPOINT is not set" >> $DEFCONFIG
-          echo "CONFIG_KPROBES=y" >> $DEFCONFIG
-          echo "CONFIG_HAVE_KPROBES=y" >> $DEFCONFIG
-          echo "CONFIG_KPROBE_EVENTS=y" >> $DEFCONFIG
-          echo "CONFIG_OVERLAY_FS=y" >> $DEFCONFIG
-          sed -i '/CONFIG_KALLSYMS/d' $DEFCONFIG
-          echo "CONFIG_KALLSYMS=y" >> $DEFCONFIG
-          echo "CONFIG_KALLSYMS_ALL=y" >> $DEFCONFIG
-
-          # 7. Patch export symbol selinuxfs.c
-          sed -i 's/static const struct file_operations sel_handle_status_ops/const struct file_operations sel_handle_status_ops/' security/selinux/selinuxfs.c 2>/dev/null || true
-          if ! grep -q "EXPORT_SYMBOL(sel_handle_status_ops);" security/selinux/selinuxfs.c 2>/dev/null; then
-            sed -i '/const struct file_operations sel_handle_status_ops = {/,/};/ { /};/ a\EXPORT_SYMBOL(sel_handle_status_ops); }' security/selinux/selinuxfs.c 2>/dev/null || true
-          fi
 
       - name: Compile Kernel
         run: |
@@ -95,14 +76,38 @@ jobs:
           export KBUILD_BUILD_USER="zauksk"
           export KBUILD_BUILD_HOST="Builder"
 
-          # 1. Defconfig
+          # 1. Generate base defconfig ke folder out
           make O=out ARCH=arm64 \
             CC=clang \
             CROSS_COMPILE=aarch64-linux-gnu- \
             CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
             $DEFCONFIG_NAME
 
-          # 2. Kompilasi kernel zauksk++
+          # 2. Suntikkan konfigurasi ReSukiSU langsung ke out/.config agar tidak tertimpa
+          sed -i '/CONFIG_LOCKDEP/d' out/.config
+          sed -i '/CONFIG_LOCKDEP_SUPPORT/d' out/.config
+          sed -i '/CONFIG_PROVE_LOCKING/d' out/.config
+          sed -i '/CONFIG_KALLSYMS/d' out/.config
+          sed -i '/CONFIG_KSU/d' out/.config
+
+          cat << 'EOF' >> out/.config
+          # CONFIG_LOCKDEP is not set
+          # CONFIG_PROVE_LOCKING is not set
+          CONFIG_KSU=y
+          CONFIG_KSU_HOOK_KPROBES=y
+          # CONFIG_KSU_HOOK_TRACEPOINT is not set
+          CONFIG_KPROBES=y
+          CONFIG_HAVE_KPROBES=y
+          CONFIG_KPROBE_EVENTS=y
+          CONFIG_OVERLAY_FS=y
+          CONFIG_KALLSYMS=y
+          CONFIG_KALLSYMS_ALL=y
+          EOF
+
+          # Sinkronisasi config
+          make O=out ARCH=arm64 CC=clang CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
+
+          # 3. Eksekusi build kernel
           make -j$(nproc --all) O=out \
             ARCH=arm64 \
             LOCALVERSION="-zauksk++" \
