@@ -31,7 +31,6 @@ jobs:
           cd kernel-source
           curl -LSs "https://raw.githubusercontent.com/rsuntk/ReSukiSU/main/kernel/setup.sh" | bash -s main
           
-          # Cari file defconfig gale yang tersedia
           DEFCONFIG=$(find arch/arm64/configs/ -name "*gale*defconfig" | head -n 1)
           if [ -z "$DEFCONFIG" ]; then
             DEFCONFIG="arch/arm64/configs/gale_defconfig"
@@ -49,6 +48,8 @@ jobs:
           export PATH="${GITHUB_WORKSPACE}/clang/bin:$PATH"
           export ARCH=arm64
           export SUBARCH=arm64
+          export KBUILD_BUILD_USER="zauksk"
+          export KBUILD_BUILD_HOST="Builder"
           
           DEFCONFIG_NAME=$(ls arch/arm64/configs/ | grep gale | grep defconfig | head -n 1)
           if [ -z "$DEFCONFIG_NAME" ]; then
@@ -58,6 +59,7 @@ jobs:
           make O=out ARCH=arm64 $DEFCONFIG_NAME
           make -j$(nproc --all) O=out \
             ARCH=arm64 \
+            LOCALVERSION="-zauksk" \
             CC=clang \
             CLANG_TRIPLE=aarch64-linux-gnu- \
             CROSS_COMPILE=aarch64-linux-android- \
@@ -67,7 +69,6 @@ jobs:
         run: |
           git clone https://github.com/osm0sis/AnyKernel3.git --depth=1 ak3
           
-          # Cari file Image yang dihasilkan
           IMAGE_FILE=$(find kernel-source/out/arch/arm64/boot/ -type f \( -name "Image.gz-dtb" -o -name "Image.gz" -o -name "Image" \) | head -n 1)
           if [ -n "$IMAGE_FILE" ]; then
             cp "$IMAGE_FILE" ak3/$(basename "$IMAGE_FILE")
@@ -77,10 +78,11 @@ jobs:
           fi
           
           cd ak3
-          zip -r9 ../Kernel-Redmi13C-ReSukiSU.zip * -x .git README.md *placeholder
+          zip -r9 ../Kernel-Redmi13C-zauksk-ReSukiSU.zip * -x .git README.md *placeholder
 
       - name: Upload Kernel Zip
         uses: actions/upload-artifact@v4
         with:
-          name: Kernel-Redmi13C-ReSukiSU
-          path: Kernel-Redmi13C-ReSukiSU.zip
+          name: Kernel-Redmi13C-zauksk-ReSukiSU
+          path: Kernel-Redmi13C-zauksk-ReSukiSU.zip
+          
