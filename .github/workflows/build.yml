@@ -1,4 +1,4 @@
-name: Build Redmi 13C Kernel - zauksk++ ReSukiSU
+name: Build Redmi 13C Kernel - zauksk++
 
 on:
   workflow_dispatch:
@@ -17,34 +17,31 @@ jobs:
 
       - name: Download AOSP Toolchain (Clang r383902 + GCC 4.9)
         run: |
-          git clone https://gitlab.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-r383902.git --depth=1 clang
+          mkdir -p clang
+          curl -LSs "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android12-release/clang-r383902.tar.gz" -o clang.tar.gz
+          tar -xzf clang.tar.gz -C clang
+          rm -f clang.tar.gz
+          
           git clone https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 --depth=1 gcc64
           git clone https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9 --depth=1 gcc32
 
-      - name: Clone Mayuri Kernel Source (Branch KSU)
+      - name: Clone Kernel Source
         run: |
-          # Clone langsung branch KSU/CIP Mayuri
           git clone https://github.com/Mayuri-Chan/android_kernel_xiaomi_gale.git -b lineage-21-ksu --depth=1 kernel-source || \
-          git clone https://github.com/Mayuri-Chan/android_kernel_xiaomi_gale.git -b 14-ksu --depth=1 kernel-source || \
-          git clone https://github.com/xxblebleblexx/android_kernel_xiaomi_gale.git --depth=1 kernel-source
+          git clone https://github.com/wulan17/android_kernel_xiaomi_gale.git -b lineage-21-ksu --depth=1 kernel-source || \
+          git clone https://github.com/Mayuri-Chan/android_kernel_xiaomi_gale.git --depth=1 kernel-source
 
-      - name: Configure Kernel & ReSukiSU
+      - name: Setup Defconfig
         run: |
           cd kernel-source
-          
-          # Jika source belum ada ReSukiSU, tarik submodule yang kompatibel dengan 4.19
-          if [ ! -d "drivers/kernelsu" ] && [ ! -d "KernelSU" ]; then
-            git clone https://github.com/ReSukiSU/ReSukiSU.git -b legacy drivers/kernelsu || \
-            git clone https://github.com/tiann/KernelSU.git -b v0.9.5 drivers/kernelsu
-          fi
-
           DEFCONFIG=$(find arch/arm64/configs/ -name "*gale*defconfig" | head -n 1)
           if [ -z "$DEFCONFIG" ]; then
             DEFCONFIG="arch/arm64/configs/gale_defconfig"
           fi
+          echo "Using defconfig: $DEFCONFIG"
           echo "DEFCONFIG_NAME=$(basename $DEFCONFIG)" >> $GITHUB_ENV
 
-          # Aktifkan konfigurasi root
+          # Aktifkan konfigurasi KSU bawaan
           echo "CONFIG_KSU=y" >> $DEFCONFIG
           echo "CONFIG_OVERLAY_FS=y" >> $DEFCONFIG
 
@@ -61,10 +58,10 @@ jobs:
           export KBUILD_BUILD_USER="zauksk"
           export KBUILD_BUILD_HOST="Builder"
           
-          # Buat config
+          # Konfigurasi defconfig
           make O=out ARCH=arm64 $DEFCONFIG_NAME
           
-          # Kompilasi sampai selesai
+          # Kompilasi kernel murni zauksk++
           make -j$(nproc --all) O=out \
             ARCH=arm64 \
             LOCALVERSION="-zauksk++" \
@@ -91,13 +88,15 @@ jobs:
             exit 1
           fi
           
+          echo "Ditemukan output Image: $IMAGE_FILE"
           cp "$IMAGE_FILE" ak3/$(basename "$IMAGE_FILE")
+          
           cd ak3
-          zip -r9 ../Kernel-Redmi13C-zauksk++-ReSukiSU.zip * -x .git README.md *placeholder
+          zip -r9 ../Kernel-Redmi13C-zauksk++.zip * -x .git README.md *placeholder
 
       - name: Upload Kernel Zip
         uses: actions/upload-artifact@v4
         with:
-          name: Kernel-Redmi13C-zauksk++-ReSukiSU
-          path: Kernel-Redmi13C-zauksk++-ReSukiSU.zip
+          name: Kernel-Redmi13C-zauksk++
+          path: Kernel-Redmi13C-zauksk++.zip
           
