@@ -23,32 +23,38 @@ jobs:
         run: |
           git clone https://github.com/xxblebleblexx/android_kernel_xiaomi_gale.git --depth=1 kernel-source
 
-      - name: Integrate ReSukiSU & Clean Patch
+      - name: Integrate ReSukiSU & Setup Defconfig
         run: |
           cd kernel-source
           
-          # 1. Jalankan integrasi ReSukiSU terlebih dahulu
+          # Integrasi ReSukiSU
           curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash -s main || true
           
-          # 2. Hapus seluruh blok pemanggilan mtk_btag_pidlog_set_pid_pages (multiline) di fs/fuse/file.c
+          # Patch FUSE multiline
           python3 -c '
           import re
           with open("fs/fuse/file.c", "r") as f:
               data = f.read()
-          # Hapus fungsi beserta seluruh argumen baris barunya sampai ketemu titik koma
           data = re.sub(r"mtk_btag_pidlog_set_pid_pages\s*\([^;]*\);", "/* mtk_btag_disabled */", data, flags=re.DOTALL)
           with open("fs/fuse/file.c", "w") as f:
               f.write(data)
-          print("Patch fs/fuse/file.c selesai diterapkan.")
           '
 
-          # 3. Konfigurasi defconfig
           DEFCONFIG=$(find arch/arm64/configs/ -name "*gale*defconfig" | head -n 1)
           if [ -z "$DEFCONFIG" ]; then
             DEFCONFIG="arch/arm64/configs/gale_defconfig"
           fi
           echo "Using defconfig: $DEFCONFIG"
           
+          # Matikan LOCKDEP/PROVE_LOCKING yang memicu error di kernel/locking/lockdep.c
+          sed -i '/CONFIG_LOCKDEP/d' $DEFCONFIG
+          sed -i '/CONFIG_PROVE_LOCKING/d' $DEFCONFIG
+          sed -i '/CONFIG_DEBUG_LOCK_ALLOC/d' $DEFCONFIG
+          echo "# CONFIG_LOCKDEP is not set" >> $DEFCONFIG
+          echo "# CONFIG_PROVE_LOCKING is not set" >> $DEFCONFIG
+          echo "# CONFIG_DEBUG_LOCK_ALLOC is not set" >> $DEFCONFIG
+
+          # Fitur ReSukiSU & Kprobes
           echo "CONFIG_KSU=y" >> $DEFCONFIG
           echo "CONFIG_KPROBES=y" >> $DEFCONFIG
           echo "CONFIG_HAVE_KPROBES=y" >> $DEFCONFIG
@@ -70,6 +76,12 @@ jobs:
           fi
           
           make O=out ARCH=arm64 $DEFCONFIG_NAME
+
+          # Pastikan LOCKDEP benar-benar mati di out/.config
+          sed -i 's/CONFIG_LOCKDEP=y/# CONFIG_LOCKDEP is not set/g' out/.config || true
+          sed -i 's/CONFIG_PROVE_LOCKING=y/# CONFIG_PROVE_LOCKING is not set/g' out/.config || true
+          sed -i 's/CONFIG_DEBUG_LOCK_ALLOC=y/# CONFIG_DEBUG_LOCK_ALLOC is not set/g' out/.config || true
+          
           make -j$(nproc --all) O=out \
             ARCH=arm64 \
             LOCALVERSION="-zauksk" \
@@ -102,4 +114,3 @@ jobs:
         with:
           name: Kernel-Redmi13C-zauksk-ReSukiSU
           path: Kernel-Redmi13C-zauksk-ReSukiSU.zip
-          
