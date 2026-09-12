@@ -15,23 +15,28 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y git ccache automake flex lzop bison gperf build-essential zip curl zlib1g-dev libncurses5-dev libssl-dev bc liblz4-tool libelf-dev python3 binutils-aarch64-linux-gnu
 
-      - name: Download AOSP Toolchain (Google Clang r383902)
+      - name: Download AOSP Toolchain (Clang r383902 + GCC 4.9)
         run: |
           git clone https://gitlab.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-r383902.git --depth=1 clang
           git clone https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 --depth=1 gcc64
           git clone https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9 --depth=1 gcc32
 
-      - name: Clone Kernel Source
+      - name: Clone Mayuri Kernel Source (Branch KSU)
         run: |
+          # Clone langsung branch KSU/CIP Mayuri
+          git clone https://github.com/Mayuri-Chan/android_kernel_xiaomi_gale.git -b lineage-21-ksu --depth=1 kernel-source || \
+          git clone https://github.com/Mayuri-Chan/android_kernel_xiaomi_gale.git -b 14-ksu --depth=1 kernel-source || \
           git clone https://github.com/xxblebleblexx/android_kernel_xiaomi_gale.git --depth=1 kernel-source
 
-      - name: Integrate ReSukiSU (Non-GKI 4.19 Compatible)
+      - name: Configure Kernel & ReSukiSU
         run: |
           cd kernel-source
           
-          # Setup ReSukiSU/KernelSU versi kompatibel Non-GKI
-          curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash -s v0.9.5 || \
-          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5
+          # Jika source belum ada ReSukiSU, tarik submodule yang kompatibel dengan 4.19
+          if [ ! -d "drivers/kernelsu" ] && [ ! -d "KernelSU" ]; then
+            git clone https://github.com/ReSukiSU/ReSukiSU.git -b legacy drivers/kernelsu || \
+            git clone https://github.com/tiann/KernelSU.git -b v0.9.5 drivers/kernelsu
+          fi
 
           DEFCONFIG=$(find arch/arm64/configs/ -name "*gale*defconfig" | head -n 1)
           if [ -z "$DEFCONFIG" ]; then
@@ -39,11 +44,8 @@ jobs:
           fi
           echo "DEFCONFIG_NAME=$(basename $DEFCONFIG)" >> $GITHUB_ENV
 
-          # Aktifkan hook Kprobes untuk Non-GKI
+          # Aktifkan konfigurasi root
           echo "CONFIG_KSU=y" >> $DEFCONFIG
-          echo "CONFIG_KPROBES=y" >> $DEFCONFIG
-          echo "CONFIG_HAVE_KPROBES=y" >> $DEFCONFIG
-          echo "CONFIG_KPROBE_EVENTS=y" >> $DEFCONFIG
           echo "CONFIG_OVERLAY_FS=y" >> $DEFCONFIG
 
       - name: Compile Kernel
@@ -59,8 +61,10 @@ jobs:
           export KBUILD_BUILD_USER="zauksk"
           export KBUILD_BUILD_HOST="Builder"
           
+          # Buat config
           make O=out ARCH=arm64 $DEFCONFIG_NAME
           
+          # Kompilasi sampai selesai
           make -j$(nproc --all) O=out \
             ARCH=arm64 \
             LOCALVERSION="-zauksk++" \
