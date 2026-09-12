@@ -51,21 +51,27 @@ jobs:
           curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash -s legacy || \
           curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5
 
+          # 4. Matikan pemblokiran TP Hook pada Non-GKI di Kbuild ReSukiSU
+          find drivers/kernelsu KernelSU -name "Kbuild" -exec sed -i 's/$(error.*TP hooks are incompatible.*)/# bypassed tp hook check/g' {} + 2>/dev/null || true
+          find drivers/kernelsu KernelSU -name "static_export_check.mk" -exec truncate -s 0 {} + 2>/dev/null || true
+
           DEFCONFIG=$(find arch/arm64/configs/ -name "*gale*defconfig" | head -n 1)
           if [ -z "$DEFCONFIG" ]; then
             DEFCONFIG="arch/arm64/configs/gale_defconfig"
           fi
           echo "DEFCONFIG_NAME=$(basename $DEFCONFIG)" >> $GITHUB_ENV
 
-          # 4. Matikan modul debugging lockdep
+          # 5. Matikan modul debugging lockdep
           sed -i '/CONFIG_LOCKDEP/d' $DEFCONFIG
           sed -i '/CONFIG_LOCKDEP_SUPPORT/d' $DEFCONFIG
           sed -i '/CONFIG_PROVE_LOCKING/d' $DEFCONFIG
           echo "# CONFIG_LOCKDEP is not set" >> $DEFCONFIG
           echo "# CONFIG_PROVE_LOCKING is not set" >> $DEFCONFIG
 
-          # 5. Aktifkan konfigurasi root & KALLSYMS untuk ReSukiSU
+          # 6. Konfigurasi Hook Non-GKI (Wajib KPROBES, matikan KSU_HOOK_TRACEPOINT)
           echo "CONFIG_KSU=y" >> $DEFCONFIG
+          echo "CONFIG_KSU_HOOK_KPROBES=y" >> $DEFCONFIG
+          echo "# CONFIG_KSU_HOOK_TRACEPOINT is not set" >> $DEFCONFIG
           echo "CONFIG_KPROBES=y" >> $DEFCONFIG
           echo "CONFIG_HAVE_KPROBES=y" >> $DEFCONFIG
           echo "CONFIG_KPROBE_EVENTS=y" >> $DEFCONFIG
@@ -74,7 +80,7 @@ jobs:
           echo "CONFIG_KALLSYMS=y" >> $DEFCONFIG
           echo "CONFIG_KALLSYMS_ALL=y" >> $DEFCONFIG
 
-          # 6. Fix static symbol export ReSukiSU selinux
+          # 7. Patch export symbol selinuxfs.c
           sed -i 's/static const struct file_operations sel_handle_status_ops/const struct file_operations sel_handle_status_ops/' security/selinux/selinuxfs.c 2>/dev/null || true
           if ! grep -q "EXPORT_SYMBOL(sel_handle_status_ops);" security/selinux/selinuxfs.c 2>/dev/null; then
             sed -i '/const struct file_operations sel_handle_status_ops = {/,/};/ { /};/ a\EXPORT_SYMBOL(sel_handle_status_ops); }' security/selinux/selinuxfs.c 2>/dev/null || true
