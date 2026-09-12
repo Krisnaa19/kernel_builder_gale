@@ -30,7 +30,7 @@ jobs:
           # 1. Integrasi ReSukiSU
           curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash -s main || true
           
-          # 2. Netralkan mtk_btag_pidlog di FUSE
+          # 2. Netralkan pemanggilan mtk_btag_pidlog di FUSE
           python3 -c '
           import re
           with open("fs/fuse/file.c", "r") as f:
@@ -43,11 +43,14 @@ jobs:
           # 3. Lumpuhkan lockdep.c
           sed -i 's/.*lockdep\.o.*/# skipped/g' kernel/locking/Makefile || true
 
-          # 4. Kosongkan total isi block/ssg-iosched.c
-          if [ -f block/ssg-iosched.c ]; then
-            echo "/* SSG scheduler disabled */" > block/ssg-iosched.c
+          # 4. Buat dummy C file untuk ssg agar make target tetap terpenuhi tanpa error
+          find block/ -name "*ssg*" -name "*.c" -exec sh -c 'echo "/* ssg disabled */" > "{}"' \;
+          if [ -f block/ssg.c ]; then
+            echo "/* ssg disabled */" > block/ssg.c
           fi
-          sed -i 's/.*ssg-iosched\.o.*/# skipped/g' block/Makefile || true
+          if [ -f block/ssg-iosched.c ]; then
+            echo "/* ssg disabled */" > block/ssg-iosched.c
+          fi
 
           DEFCONFIG=$(find arch/arm64/configs/ -name "*gale*defconfig" | head -n 1)
           if [ -z "$DEFCONFIG" ]; then
@@ -55,15 +58,15 @@ jobs:
           fi
           echo "Using defconfig: $DEFCONFIG"
           
+          # Bersihkan konfigurasi bermasalah
           sed -i '/CONFIG_LOCKDEP/d' $DEFCONFIG
           sed -i '/CONFIG_PROVE_LOCKING/d' $DEFCONFIG
           sed -i '/CONFIG_DEBUG_LOCK_ALLOC/d' $DEFCONFIG
-          sed -i '/CONFIG_IOSCHED_SSG/d' $DEFCONFIG
           echo "# CONFIG_LOCKDEP is not set" >> $DEFCONFIG
           echo "# CONFIG_PROVE_LOCKING is not set" >> $DEFCONFIG
           echo "# CONFIG_DEBUG_LOCK_ALLOC is not set" >> $DEFCONFIG
-          echo "# CONFIG_IOSCHED_SSG is not set" >> $DEFCONFIG
 
+          # Fitur ReSukiSU
           echo "CONFIG_KSU=y" >> $DEFCONFIG
           echo "CONFIG_KPROBES=y" >> $DEFCONFIG
           echo "CONFIG_HAVE_KPROBES=y" >> $DEFCONFIG
@@ -89,26 +92,13 @@ jobs:
           sed -i 's/CONFIG_LOCKDEP=y/# CONFIG_LOCKDEP is not set/g' out/.config || true
           sed -i 's/CONFIG_PROVE_LOCKING=y/# CONFIG_PROVE_LOCKING is not set/g' out/.config || true
           sed -i 's/CONFIG_DEBUG_LOCK_ALLOC=y/# CONFIG_DEBUG_LOCK_ALLOC is not set/g' out/.config || true
-          sed -i 's/CONFIG_IOSCHED_SSG=y/# CONFIG_IOSCHED_SSG is not set/g' out/.config || true
           
           make -j$(nproc --all) O=out \
             ARCH=arm64 \
             LOCALVERSION="-zauksk" \
             CC=clang \
             CROSS_COMPILE=aarch64-linux-gnu- \
-            CROSS_COMPILE_ARM32=arm-linux-gnueabi- Image.gz-dtb || \
-          make -j$(nproc --all) O=out \
-            ARCH=arm64 \
-            LOCALVERSION="-zauksk" \
-            CC=clang \
-            CROSS_COMPILE=aarch64-linux-gnu- \
-            CROSS_COMPILE_ARM32=arm-linux-gnueabi- Image.gz || \
-          make -j$(nproc --all) O=out \
-            ARCH=arm64 \
-            LOCALVERSION="-zauksk" \
-            CC=clang \
-            CROSS_COMPILE=aarch64-linux-gnu- \
-            CROSS_COMPILE_ARM32=arm-linux-gnueabi- Image
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi-
 
       - name: Package with AnyKernel3
         run: |
@@ -119,16 +109,15 @@ jobs:
           sed -i 's|block=.*|block=/dev/block/by-name/boot|g' ak3/anykernel.sh
           sed -i 's/is_slot_device=.*/is_slot_device=auto/g' ak3/anykernel.sh
           
-          # Cari file Image hasil build di seluruh workspace tanpa batasan path kaku
-          IMAGE_FILE=$(find kernel-source/ -type f \( -name "Image.gz-dtb" -o -name "Image.gz" -o -name "Image" \) | head -n 1)
+          # Cari file Image yang sudah selesai dikompilasi
+          IMAGE_FILE=$(find kernel-source -type f \( -name "Image.gz-dtb" -o -name "Image.gz" -o -name "Image" \) | head -n 1)
           
           if [ -z "$IMAGE_FILE" ]; then
             echo "Error: File kernel Image tidak ditemukan!"
-            find kernel-source/ -name "*Image*"
             exit 1
           fi
           
-          echo "Ditemukan kernel Image: $IMAGE_FILE"
+          echo "File kernel ditemukan: $IMAGE_FILE"
           cp "$IMAGE_FILE" ak3/$(basename "$IMAGE_FILE")
           
           cd ak3
