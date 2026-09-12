@@ -43,7 +43,7 @@ jobs:
           # 3. Lumpuhkan lockdep.c
           sed -i 's/.*lockdep\.o.*/# skipped/g' kernel/locking/Makefile || true
 
-          # 4. Buat dummy C file untuk ssg agar make target tetap terpenuhi tanpa error
+          # 4. Dummy ssg untuk block I/O
           find block/ -name "*ssg*" -name "*.c" -exec sh -c 'echo "/* ssg disabled */" > "{}"' \;
           if [ -f block/ssg.c ]; then
             echo "/* ssg disabled */" > block/ssg.c
@@ -52,13 +52,15 @@ jobs:
             echo "/* ssg disabled */" > block/ssg-iosched.c
           fi
 
+          # 5. Perbaiki ret |= pr_info(...) di driver audio fs15xx
+          find sound/soc/codecs/ -name "fs15xx.c" -exec sed -i 's/ret\s*|=\s*pr_info/pr_info/g' {} + || true
+
           DEFCONFIG=$(find arch/arm64/configs/ -name "*gale*defconfig" | head -n 1)
           if [ -z "$DEFCONFIG" ]; then
             DEFCONFIG="arch/arm64/configs/gale_defconfig"
           fi
           echo "Using defconfig: $DEFCONFIG"
           
-          # Bersihkan konfigurasi bermasalah
           sed -i '/CONFIG_LOCKDEP/d' $DEFCONFIG
           sed -i '/CONFIG_PROVE_LOCKING/d' $DEFCONFIG
           sed -i '/CONFIG_DEBUG_LOCK_ALLOC/d' $DEFCONFIG
@@ -66,7 +68,6 @@ jobs:
           echo "# CONFIG_PROVE_LOCKING is not set" >> $DEFCONFIG
           echo "# CONFIG_DEBUG_LOCK_ALLOC is not set" >> $DEFCONFIG
 
-          # Fitur ReSukiSU
           echo "CONFIG_KSU=y" >> $DEFCONFIG
           echo "CONFIG_KPROBES=y" >> $DEFCONFIG
           echo "CONFIG_HAVE_KPROBES=y" >> $DEFCONFIG
@@ -109,7 +110,6 @@ jobs:
           sed -i 's|block=.*|block=/dev/block/by-name/boot|g' ak3/anykernel.sh
           sed -i 's/is_slot_device=.*/is_slot_device=auto/g' ak3/anykernel.sh
           
-          # Cari file Image yang sudah selesai dikompilasi
           IMAGE_FILE=$(find kernel-source -type f \( -name "Image.gz-dtb" -o -name "Image.gz" -o -name "Image" \) | head -n 1)
           
           if [ -z "$IMAGE_FILE" ]; then
