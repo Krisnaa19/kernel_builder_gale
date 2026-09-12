@@ -1,4 +1,4 @@
-name: Build Redmi 13C Kernel with ReSukiSU
+name: Build Redmi 13C Kernel - zauksk++ ReSukiSU
 
 on:
   workflow_dispatch:
@@ -10,70 +10,36 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Install Build Dependencies
+      - name: Setup Build Environment
         run: |
           sudo apt-get update
-          sudo apt-get install -y git ccache automake flex lzop bison gperf build-essential zip curl zlib1g-dev libncurses5-dev libssl-dev bc liblz4-tool libelf-dev python3
+          sudo apt-get install -y git ccache automake flex lzop bison gperf build-essential zip curl zlib1g-dev libncurses5-dev libssl-dev bc liblz4-tool libelf-dev python3 binutils-aarch64-linux-gnu
 
-      - name: Download Clang Toolchain
+      - name: Download AOSP Toolchain (Google Clang r383902)
         run: |
-          git clone https://github.com/kdrag0n/proton-clang.git --depth=1 clang
+          git clone https://gitlab.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-r383902.git --depth=1 clang
+          git clone https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 --depth=1 gcc64
+          git clone https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9 --depth=1 gcc32
 
       - name: Clone Kernel Source
         run: |
           git clone https://github.com/xxblebleblexx/android_kernel_xiaomi_gale.git --depth=1 kernel-source
 
-      - name: Integrate ReSukiSU & Patch Conflicts
+      - name: Integrate ReSukiSU (Non-GKI 4.19 Compatible)
         run: |
           cd kernel-source
           
-          # 1. Integrasi ReSukiSU
-          curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash -s main || true
-          
-          # Bypass proteksi Non-GKI ReSukiSU di drivers/kernelsu/Kbuild
-          if [ -f drivers/kernelsu/Kbuild ]; then
-            sed -i 's/\$(error.*TP hooks are incompatible.*)/# bypassed non-gki check/g' drivers/kernelsu/Kbuild || true
-          fi
-
-          # 2. Netralkan mtk_btag_pidlog di FUSE
-          python3 -c '
-          import re
-          with open("fs/fuse/file.c", "r") as f:
-              data = f.read()
-          data = re.sub(r"mtk_btag_pidlog_set_pid_pages\s*\([^;]*\);", "/* mtk_btag_disabled */", data, flags=re.DOTALL)
-          with open("fs/fuse/file.c", "w") as f:
-              f.write(data)
-          '
-
-          # 3. Lumpuhkan lockdep.c
-          sed -i 's/.*lockdep\.o.*/# skipped/g' kernel/locking/Makefile || true
-
-          # 4. Dummy ssg untuk block I/O
-          find block/ -name "*ssg*" -name "*.c" -exec sh -c 'echo "/* ssg disabled */" > "{}"' \;
-          if [ -f block/ssg.c ]; then
-            echo "/* ssg disabled */" > block/ssg.c
-          fi
-          if [ -f block/ssg-iosched.c ]; then
-            echo "/* ssg disabled */" > block/ssg-iosched.c
-          fi
-
-          # 5. Patch driver audio fs15xx
-          find sound/soc/codecs/ -name "fs15xx.c" -exec sed -i 's/ret\s*|=\s*pr_info/pr_info/g' {} + || true
+          # Setup ReSukiSU/KernelSU versi kompatibel Non-GKI
+          curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash -s v0.9.5 || \
+          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5
 
           DEFCONFIG=$(find arch/arm64/configs/ -name "*gale*defconfig" | head -n 1)
           if [ -z "$DEFCONFIG" ]; then
             DEFCONFIG="arch/arm64/configs/gale_defconfig"
           fi
-          echo "Using defconfig: $DEFCONFIG"
-          
-          sed -i '/CONFIG_LOCKDEP/d' $DEFCONFIG
-          sed -i '/CONFIG_PROVE_LOCKING/d' $DEFCONFIG
-          sed -i '/CONFIG_DEBUG_LOCK_ALLOC/d' $DEFCONFIG
-          echo "# CONFIG_LOCKDEP is not set" >> $DEFCONFIG
-          echo "# CONFIG_PROVE_LOCKING is not set" >> $DEFCONFIG
-          echo "# CONFIG_DEBUG_LOCK_ALLOC is not set" >> $DEFCONFIG
+          echo "DEFCONFIG_NAME=$(basename $DEFCONFIG)" >> $GITHUB_ENV
 
-          # Fitur ReSukiSU untuk Non-GKI Kprobes
+          # Aktifkan hook Kprobes untuk Non-GKI
           echo "CONFIG_KSU=y" >> $DEFCONFIG
           echo "CONFIG_KPROBES=y" >> $DEFCONFIG
           echo "CONFIG_HAVE_KPROBES=y" >> $DEFCONFIG
@@ -83,29 +49,27 @@ jobs:
       - name: Compile Kernel
         run: |
           cd kernel-source
-          export PATH="${GITHUB_WORKSPACE}/clang/bin:$PATH"
+          export PATH="${GITHUB_WORKSPACE}/clang/bin:${GITHUB_WORKSPACE}/gcc64/bin:${GITHUB_WORKSPACE}/gcc32/bin:$PATH"
           export ARCH=arm64
           export SUBARCH=arm64
+          export CC="clang"
+          export CLANG_TRIPLE="aarch64-linux-gnu-"
+          export CROSS_COMPILE="aarch64-linux-android-"
+          export CROSS_COMPILE_ARM32="arm-linux-androideabi-"
           export KBUILD_BUILD_USER="zauksk"
           export KBUILD_BUILD_HOST="Builder"
           
-          DEFCONFIG_NAME=$(ls arch/arm64/configs/ | grep gale | grep defconfig | head -n 1)
-          if [ -z "$DEFCONFIG_NAME" ]; then
-            DEFCONFIG_NAME="gale_defconfig"
-          fi
-          
           make O=out ARCH=arm64 $DEFCONFIG_NAME
-
-          sed -i 's/CONFIG_LOCKDEP=y/# CONFIG_LOCKDEP is not set/g' out/.config || true
-          sed -i 's/CONFIG_PROVE_LOCKING=y/# CONFIG_PROVE_LOCKING is not set/g' out/.config || true
-          sed -i 's/CONFIG_DEBUG_LOCK_ALLOC=y/# CONFIG_DEBUG_LOCK_ALLOC is not set/g' out/.config || true
           
           make -j$(nproc --all) O=out \
             ARCH=arm64 \
-            LOCALVERSION="-zauksk" \
+            LOCALVERSION="-zauksk++" \
             CC=clang \
-            CROSS_COMPILE=aarch64-linux-gnu- \
-            CROSS_COMPILE_ARM32=arm-linux-gnueabi-
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            CROSS_COMPILE=aarch64-linux-android- \
+            CROSS_COMPILE_ARM32=arm-linux-androideabi- \
+            KCFLAGS="-w" \
+            KCPPFLAGS="-w"
 
       - name: Package with AnyKernel3
         run: |
@@ -116,22 +80,20 @@ jobs:
           sed -i 's|block=.*|block=/dev/block/by-name/boot|g' ak3/anykernel.sh
           sed -i 's/is_slot_device=.*/is_slot_device=auto/g' ak3/anykernel.sh
           
-          IMAGE_FILE=$(find kernel-source -type f \( -name "Image.gz-dtb" -o -name "Image.gz" -o -name "Image" \) | head -n 1)
+          IMAGE_FILE=$(find kernel-source/out/arch/arm64/boot/ -type f \( -name "Image.gz-dtb" -o -name "Image.gz" -o -name "Image" \) | head -n 1)
           
           if [ -z "$IMAGE_FILE" ]; then
-            echo "Error: File kernel Image tidak ditemukan!"
+            echo "Kernel Image tidak ditemukan!"
             exit 1
           fi
           
-          echo "File kernel ditemukan: $IMAGE_FILE"
           cp "$IMAGE_FILE" ak3/$(basename "$IMAGE_FILE")
-          
           cd ak3
-          zip -r9 ../Kernel-Redmi13C-zauksk-ReSukiSU.zip * -x .git README.md *placeholder
+          zip -r9 ../Kernel-Redmi13C-zauksk++-ReSukiSU.zip * -x .git README.md *placeholder
 
       - name: Upload Kernel Zip
         uses: actions/upload-artifact@v4
         with:
-          name: Kernel-Redmi13C-zauksk-ReSukiSU
-          path: Kernel-Redmi13C-zauksk-ReSukiSU.zip
+          name: Kernel-Redmi13C-zauksk++-ReSukiSU
+          path: Kernel-Redmi13C-zauksk++-ReSukiSU.zip
           
