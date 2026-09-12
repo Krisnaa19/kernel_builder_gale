@@ -64,12 +64,21 @@ jobs:
           echo "# CONFIG_LOCKDEP is not set" >> $DEFCONFIG
           echo "# CONFIG_PROVE_LOCKING is not set" >> $DEFCONFIG
 
-          # 5. Aktifkan konfigurasi root
+          # 5. Aktifkan konfigurasi root & KALLSYMS untuk ReSukiSU
           echo "CONFIG_KSU=y" >> $DEFCONFIG
           echo "CONFIG_KPROBES=y" >> $DEFCONFIG
           echo "CONFIG_HAVE_KPROBES=y" >> $DEFCONFIG
           echo "CONFIG_KPROBE_EVENTS=y" >> $DEFCONFIG
           echo "CONFIG_OVERLAY_FS=y" >> $DEFCONFIG
+          sed -i '/CONFIG_KALLSYMS/d' $DEFCONFIG
+          echo "CONFIG_KALLSYMS=y" >> $DEFCONFIG
+          echo "CONFIG_KALLSYMS_ALL=y" >> $DEFCONFIG
+
+          # 6. Fix static symbol export ReSukiSU selinux
+          sed -i 's/static const struct file_operations sel_handle_status_ops/const struct file_operations sel_handle_status_ops/' security/selinux/selinuxfs.c 2>/dev/null || true
+          if ! grep -q "EXPORT_SYMBOL(sel_handle_status_ops);" security/selinux/selinuxfs.c 2>/dev/null; then
+            sed -i '/const struct file_operations sel_handle_status_ops = {/,/};/ { /};/ a\EXPORT_SYMBOL(sel_handle_status_ops); }' security/selinux/selinuxfs.c 2>/dev/null || true
+          fi
 
       - name: Compile Kernel
         run: |
