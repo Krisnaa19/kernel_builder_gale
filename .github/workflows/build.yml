@@ -23,11 +23,12 @@ jobs:
         run: |
           git clone https://github.com/xxblebleblexx/android_kernel_xiaomi_gale.git --depth=1 kernel-source
 
-      - name: Integrate ReSukiSU
+      - name: Setup Kernel Config & Fixes
         run: |
           cd kernel-source
-          # Mengambil setup script resmi langsung dari repositori ReSukiSU
-          curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash -s main
+          
+          # Hapus baris mtk_btag_pidlog yang rusak jika ada konflik variabel req
+          sed -i '/mtk_btag_pidlog_set_pid_pages/d' fs/fuse/file.c || true
           
           DEFCONFIG=$(find arch/arm64/configs/ -name "*gale*defconfig" | head -n 1)
           if [ -z "$DEFCONFIG" ]; then
