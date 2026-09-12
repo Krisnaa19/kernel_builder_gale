@@ -27,22 +27,22 @@ jobs:
         run: |
           cd kernel-source
           
-          # Integrasi ReSukiSU
+          # 1. Jalankan integrasi ReSukiSU terlebih dahulu
           curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash -s main || true
           
-          # Komentari blok pemanggilan mtk_btag_pidlog_set_pid_pages secara presisi menggunakan python
+          # 2. Hapus seluruh blok pemanggilan mtk_btag_pidlog_set_pid_pages (multiline) di fs/fuse/file.c
           python3 -c '
-          with open("fs/fuse/file.c", "r") as f:
-              content = f.read()
-          
           import re
-          # Ubah pemanggilan mtk_btag_pidlog_set_pid_pages(...) menjadi komentar C standar /* ... */
-          fixed = re.sub(r"(mtk_btag_pidlog_set_pid_pages\s*\([^;]+;\))", r"/* \1 */", content)
-          
+          with open("fs/fuse/file.c", "r") as f:
+              data = f.read()
+          # Hapus fungsi beserta seluruh argumen baris barunya sampai ketemu titik koma
+          data = re.sub(r"mtk_btag_pidlog_set_pid_pages\s*\([^;]*\);", "/* mtk_btag_disabled */", data, flags=re.DOTALL)
           with open("fs/fuse/file.c", "w") as f:
-              f.write(fixed)
+              f.write(data)
+          print("Patch fs/fuse/file.c selesai diterapkan.")
           '
 
+          # 3. Konfigurasi defconfig
           DEFCONFIG=$(find arch/arm64/configs/ -name "*gale*defconfig" | head -n 1)
           if [ -z "$DEFCONFIG" ]; then
             DEFCONFIG="arch/arm64/configs/gale_defconfig"
@@ -102,3 +102,4 @@ jobs:
         with:
           name: Kernel-Redmi13C-zauksk-ReSukiSU
           path: Kernel-Redmi13C-zauksk-ReSukiSU.zip
+          
