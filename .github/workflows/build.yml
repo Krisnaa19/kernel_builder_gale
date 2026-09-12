@@ -26,7 +26,14 @@ jobs:
       - name: Integrate ReSukiSU
         run: |
           cd kernel-source
-          curl -LSs "https://raw.githubusercontent.com/rsuntk/ReSukiSU/main/kernel/setup.sh" | bash -s main
+          # Integrasi ReSukiSU langsung ke direktori drivers/kernelsu
+          rm -rf drivers/kernelsu
+          git clone https://github.com/rsuntk/ReSukiSU.git --depth=1 drivers/kernelsu
+          
+          # Tambahkan entry ke drivers/Makefile jika belum ada
+          if ! grep -q "kernelsu" drivers/Makefile; then
+            echo "obj-y += kernelsu/" >> drivers/Makefile
+          fi
           
           DEFCONFIG=$(find arch/arm64/configs/ -name "*gale*defconfig" | head -n 1)
           if [ -z "$DEFCONFIG" ]; then
