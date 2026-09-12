@@ -29,9 +29,12 @@ jobs:
           git clone https://github.com/Mayuri-Chan/android_kernel_xiaomi_gale.git --depth=1 kernel-source || \
           git clone https://github.com/wulan17/android_kernel_xiaomi_gale.git --depth=1 kernel-source
 
-      - name: Inject ReSukiSU & Setup Defconfig
+      - name: Inject ReSukiSU & Patch MTK BTAG Bug
         run: |
           cd kernel-source
+
+          # Fix bug MTK BTAG di fs/fuse/file.c
+          sed -i 's/mtk_btag_pidlog_set_pid_pages(.*);/\/* mtk_btag bypassed *\//g' fs/fuse/file.c 2>/dev/null || true
 
           # Injeksi ReSukiSU khusus 4.19 (Non-GKI)
           curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash -s legacy || \
@@ -42,6 +45,10 @@ jobs:
             DEFCONFIG="arch/arm64/configs/gale_defconfig"
           fi
           echo "DEFCONFIG_NAME=$(basename $DEFCONFIG)" >> $GITHUB_ENV
+
+          # Matikan logging MTK BTAG yang bermasalah di defconfig
+          sed -i '/CONFIG_MTK_BTAG/d' $DEFCONFIG
+          echo "# CONFIG_MTK_BTAG is not set" >> $DEFCONFIG
 
           # Aktifkan konfigurasi root
           echo "CONFIG_KSU=y" >> $DEFCONFIG
