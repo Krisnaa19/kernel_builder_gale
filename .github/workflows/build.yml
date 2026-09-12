@@ -29,23 +29,22 @@ jobs:
           git clone https://github.com/Mayuri-Chan/android_kernel_xiaomi_gale.git --depth=1 kernel-source || \
           git clone https://github.com/wulan17/android_kernel_xiaomi_gale.git --depth=1 kernel-source
 
-      - name: Inject ReSukiSU & Clean FUSE Bug
+      - name: Inject ReSukiSU & Patch Configs
         run: |
           cd kernel-source
 
-          # Hapus pemanggilan mtk_btag_pidlog_set_pid_pages secara presisi menggunakan Python AST/Regex
+          # 1. Bypass bug FUSE BTAG
           python3 -c '
           import re
           path = "fs/fuse/file.c"
           with open(path, "r") as f:
               content = f.read()
-          # Hapus seluruh blok pemanggilan mtk_btag_pidlog_set_pid_pages(...) multiline
           new_content = re.sub(r"mtk_btag_pidlog_set_pid_pages\s*\([^;]*\);", "/* bypassed mtk_btag */", content)
           with open(path, "w") as f:
               f.write(new_content)
           '
 
-          # Injeksi ReSukiSU khusus non-GKI 4.19
+          # 2. Injeksi ReSukiSU Non-GKI
           curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash -s legacy || \
           curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5
 
@@ -55,7 +54,14 @@ jobs:
           fi
           echo "DEFCONFIG_NAME=$(basename $DEFCONFIG)" >> $GITHUB_ENV
 
-          # Konfigurasi KSU dan Kprobes
+          # 3. Matikan modul debugging lockdep yang memicu error
+          sed -i '/CONFIG_LOCKDEP/d' $DEFCONFIG
+          sed -i '/CONFIG_LOCKDEP_SUPPORT/d' $DEFCONFIG
+          sed -i '/CONFIG_PROVE_LOCKING/d' $DEFCONFIG
+          echo "# CONFIG_LOCKDEP is not set" >> $DEFCONFIG
+          echo "# CONFIG_PROVE_LOCKING is not set" >> $DEFCONFIG
+
+          # 4. Aktifkan konfigurasi root
           echo "CONFIG_KSU=y" >> $DEFCONFIG
           echo "CONFIG_KPROBES=y" >> $DEFCONFIG
           echo "CONFIG_HAVE_KPROBES=y" >> $DEFCONFIG
@@ -114,4 +120,3 @@ jobs:
         with:
           name: Kernel-Redmi13C-zauksk++
           path: Kernel-Redmi13C-zauksk++.zip
-          
