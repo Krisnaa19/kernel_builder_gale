@@ -1,0 +1,72 @@
+name: Build Redmi 13C Kernel with ReSukiSU
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install Build Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git ccache automake flex lzop bison gperf build-essential zip curl zlib1g-dev libncurses5-dev libssl-dev bc liblz4-tool
+
+      - name: Download Clang Toolchain
+        run: |
+          mkdir -p clang
+          cd clang
+          git clone https://gitlab.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-r416183b.git --depth=1 -b 12.0 .
+          cd ..
+
+      - name: Clone Kernel Source
+        run: |
+          # Mengambil source dari repo wulan17
+          git clone https://github.com/wulan17/kernel_xiaomi_gale.git --depth=1 kernel-source
+
+      - name: Integrate ReSukiSU
+        run: |
+          cd kernel-source
+          curl -LSs "https://raw.githubusercontent.com/rsuntk/ReSukiSU/main/kernel/setup.sh" | bash -s main
+          echo "CONFIG_KSU=y" >> arch/arm64/configs/gale_defconfig
+          echo "CONFIG_KPROBES=y" >> arch/arm64/configs/gale_defconfig
+          echo "CONFIG_HAVE_KPROBES=y" >> arch/arm64/configs/gale_defconfig
+          echo "CONFIG_KPROBE_EVENTS=y" >> arch/arm64/configs/gale_defconfig
+
+      - name: Compile Kernel
+        run: |
+          cd kernel-source
+          export PATH="${GITHUB_WORKSPACE}/clang/bin:$PATH"
+          export ARCH=arm64
+          export SUBARCH=arm64
+          
+          make O=out ARCH=arm64 gale_defconfig
+          make -j$(nproc --all) O=out \
+            ARCH=arm64 \
+            CC=clang \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            CROSS_COMPILE=aarch64-linux-android- \
+            CROSS_COMPILE_ARM32=arm-linux-androideabi-
+
+      - name: Package with AnyKernel3
+        run: |
+          git clone https://github.com/osm0sis/AnyKernel3.git --depth=1 ak3
+          if [ -f kernel-source/out/arch/arm64/boot/Image.gz-dtb ]; then
+            cp kernel-source/out/arch/arm64/boot/Image.gz-dtb ak3/Image.gz-dtb
+          elif [ -f kernel-source/out/arch/arm64/boot/Image.gz ]; then
+            cp kernel-source/out/arch/arm64/boot/Image.gz ak3/Image.gz
+          elif [ -f kernel-source/out/arch/arm64/boot/Image ]; then
+            cp kernel-source/out/arch/arm64/boot/Image ak3/Image
+          fi
+          cd ak3
+          zip -r9 ../Kernel-Redmi13C-ReSukiSU.zip * -x .git README.md *placeholder
+
+      - name: Upload Kernel Zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: Kernel-Redmi13C-ReSukiSU
+          path: Kernel-Redmi13C-ReSukiSU.zip
+          
