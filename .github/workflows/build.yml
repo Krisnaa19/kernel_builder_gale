@@ -13,7 +13,7 @@ jobs:
       - name: Install Build Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y git ccache automake flex lzop bison gperf build-essential zip curl zlib1g-dev libncurses5-dev libssl-dev bc liblz4-tool libelf-dev
+          sudo apt-get install -y git ccache automake flex lzop bison gperf build-essential zip curl zlib1g-dev libncurses5-dev libssl-dev bc liblz4-tool libelf-dev python3
 
       - name: Download Clang Toolchain
         run: |
@@ -23,23 +23,26 @@ jobs:
         run: |
           git clone https://github.com/xxblebleblexx/android_kernel_xiaomi_gale.git --depth=1 kernel-source
 
-      - name: Integrate ReSukiSU & Patch Upstream Conflict
+      - name: Integrate ReSukiSU & Clean Patch
         run: |
           cd kernel-source
           
-          # 1. Integrasi Driver ReSukiSU Resmi
+          # Integrasi ReSukiSU
           curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash -s main || true
           
-          # 2. Fix permanen mtk_btag_pidlog yang rusak akibat perubahan FUSE di CIP terbaru
-          # Netralkan makro di header bawaan MediaTek agar tidak memicu error identifier 'req'
-          find drivers/misc/mediatek -name "mtk_btag.h" -exec sed -i 's/#define mtk_btag_pidlog_set_pid_pages.*/#define mtk_btag_pidlog_set_pid_pages(...) do {} while (0)/g' {} + || true
+          # Komentari blok pemanggilan mtk_btag_pidlog_set_pid_pages secara presisi menggunakan python
+          python3 -c '
+          with open("fs/fuse/file.c", "r") as f:
+              content = f.read()
           
-          # Sisipkan juga fallback makro kosong langsung di header fs/fuse/fuse_i.h
-          if [ -f fs/fuse/fuse_i.h ]; then
-            sed -i '1i #undef mtk_btag_pidlog_set_pid_pages\n#define mtk_btag_pidlog_set_pid_pages(...) do {} while (0)' fs/fuse/fuse_i.h
-          fi
+          import re
+          # Ubah pemanggilan mtk_btag_pidlog_set_pid_pages(...) menjadi komentar C standar /* ... */
+          fixed = re.sub(r"(mtk_btag_pidlog_set_pid_pages\s*\([^;]+;\))", r"/* \1 */", content)
+          
+          with open("fs/fuse/file.c", "w") as f:
+              f.write(fixed)
+          '
 
-          # 3. Setup Konfigurasi Defconfig
           DEFCONFIG=$(find arch/arm64/configs/ -name "*gale*defconfig" | head -n 1)
           if [ -z "$DEFCONFIG" ]; then
             DEFCONFIG="arch/arm64/configs/gale_defconfig"
@@ -78,6 +81,11 @@ jobs:
         run: |
           git clone https://github.com/osm0sis/AnyKernel3.git --depth=1 ak3
           
+          sed -i 's/device.name1=.*/device.name1=gale/g' ak3/anykernel.sh
+          sed -i 's/device.name2=.*/device.name2=gust/g' ak3/anykernel.sh
+          sed -i 's|block=.*|block=/dev/block/by-name/boot|g' ak3/anykernel.sh
+          sed -i 's/is_slot_device=.*/is_slot_device=auto/g' ak3/anykernel.sh
+          
           IMAGE_FILE=$(find kernel-source/out/arch/arm64/boot/ -type f \( -name "Image.gz-dtb" -o -name "Image.gz" -o -name "Image" \) | head -n 1)
           if [ -n "$IMAGE_FILE" ]; then
             cp "$IMAGE_FILE" ak3/$(basename "$IMAGE_FILE")
@@ -94,4 +102,3 @@ jobs:
         with:
           name: Kernel-Redmi13C-zauksk-ReSukiSU
           path: Kernel-Redmi13C-zauksk-ReSukiSU.zip
-          
