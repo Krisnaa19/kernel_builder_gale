@@ -23,13 +23,23 @@ jobs:
         run: |
           git clone https://github.com/xxblebleblexx/android_kernel_xiaomi_gale.git --depth=1 kernel-source
 
-      - name: Setup Kernel Config & Fixes
+      - name: Integrate ReSukiSU & Patch Upstream Conflict
         run: |
           cd kernel-source
           
-          # Hapus baris mtk_btag_pidlog yang rusak jika ada konflik variabel req
-          sed -i '/mtk_btag_pidlog_set_pid_pages/d' fs/fuse/file.c || true
+          # 1. Integrasi Driver ReSukiSU Resmi
+          curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash -s main || true
           
+          # 2. Fix permanen mtk_btag_pidlog yang rusak akibat perubahan FUSE di CIP terbaru
+          # Netralkan makro di header bawaan MediaTek agar tidak memicu error identifier 'req'
+          find drivers/misc/mediatek -name "mtk_btag.h" -exec sed -i 's/#define mtk_btag_pidlog_set_pid_pages.*/#define mtk_btag_pidlog_set_pid_pages(...) do {} while (0)/g' {} + || true
+          
+          # Sisipkan juga fallback makro kosong langsung di header fs/fuse/fuse_i.h
+          if [ -f fs/fuse/fuse_i.h ]; then
+            sed -i '1i #undef mtk_btag_pidlog_set_pid_pages\n#define mtk_btag_pidlog_set_pid_pages(...) do {} while (0)' fs/fuse/fuse_i.h
+          fi
+
+          # 3. Setup Konfigurasi Defconfig
           DEFCONFIG=$(find arch/arm64/configs/ -name "*gale*defconfig" | head -n 1)
           if [ -z "$DEFCONFIG" ]; then
             DEFCONFIG="arch/arm64/configs/gale_defconfig"
