@@ -44,7 +44,10 @@ jobs:
               f.write(new_content)
           '
 
-          # 2. Injeksi ReSukiSU Non-GKI
+          # 2. Fix bug ret |= pr_info pada sound driver fs15xx
+          sed -i 's/ret |= pr_info/pr_info/g' sound/soc/codecs/fs15xx/fs15xx.c 2>/dev/null || true
+
+          # 3. Injeksi ReSukiSU Non-GKI
           curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash -s legacy || \
           curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5
 
@@ -54,14 +57,14 @@ jobs:
           fi
           echo "DEFCONFIG_NAME=$(basename $DEFCONFIG)" >> $GITHUB_ENV
 
-          # 3. Matikan modul debugging lockdep yang memicu error
+          # 4. Matikan modul debugging lockdep
           sed -i '/CONFIG_LOCKDEP/d' $DEFCONFIG
           sed -i '/CONFIG_LOCKDEP_SUPPORT/d' $DEFCONFIG
           sed -i '/CONFIG_PROVE_LOCKING/d' $DEFCONFIG
           echo "# CONFIG_LOCKDEP is not set" >> $DEFCONFIG
           echo "# CONFIG_PROVE_LOCKING is not set" >> $DEFCONFIG
 
-          # 4. Aktifkan konfigurasi root
+          # 5. Aktifkan konfigurasi root
           echo "CONFIG_KSU=y" >> $DEFCONFIG
           echo "CONFIG_KPROBES=y" >> $DEFCONFIG
           echo "CONFIG_HAVE_KPROBES=y" >> $DEFCONFIG
@@ -120,3 +123,4 @@ jobs:
         with:
           name: Kernel-Redmi13C-zauksk++
           path: Kernel-Redmi13C-zauksk++.zip
+          
