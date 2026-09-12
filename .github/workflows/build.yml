@@ -30,7 +30,12 @@ jobs:
           # 1. Integrasi ReSukiSU
           curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash -s main || true
           
-          # 2. Netralkan pemanggilan mtk_btag_pidlog di FUSE
+          # Bypass proteksi Non-GKI ReSukiSU di drivers/kernelsu/Kbuild
+          if [ -f drivers/kernelsu/Kbuild ]; then
+            sed -i 's/\$(error.*TP hooks are incompatible.*)/# bypassed non-gki check/g' drivers/kernelsu/Kbuild || true
+          fi
+
+          # 2. Netralkan mtk_btag_pidlog di FUSE
           python3 -c '
           import re
           with open("fs/fuse/file.c", "r") as f:
@@ -52,7 +57,7 @@ jobs:
             echo "/* ssg disabled */" > block/ssg-iosched.c
           fi
 
-          # 5. Perbaiki ret |= pr_info(...) di driver audio fs15xx
+          # 5. Patch driver audio fs15xx
           find sound/soc/codecs/ -name "fs15xx.c" -exec sed -i 's/ret\s*|=\s*pr_info/pr_info/g' {} + || true
 
           DEFCONFIG=$(find arch/arm64/configs/ -name "*gale*defconfig" | head -n 1)
@@ -68,6 +73,7 @@ jobs:
           echo "# CONFIG_PROVE_LOCKING is not set" >> $DEFCONFIG
           echo "# CONFIG_DEBUG_LOCK_ALLOC is not set" >> $DEFCONFIG
 
+          # Fitur ReSukiSU untuk Non-GKI Kprobes
           echo "CONFIG_KSU=y" >> $DEFCONFIG
           echo "CONFIG_KPROBES=y" >> $DEFCONFIG
           echo "CONFIG_HAVE_KPROBES=y" >> $DEFCONFIG
