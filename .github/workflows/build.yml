@@ -1,3 +1,34 @@
+name: Build Redmi 13C Kernel - zauksk++ MultiSU
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: ubuntu:20.04
+
+    steps:
+      - name: Setup Build Environment (Ubuntu 20.04 Native GCC 9)
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          apt-get update
+          apt-get install -y git curl zip bc bison flex build-essential libssl-dev libelf-dev libncurses-dev ccache python3 gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu gcc-arm-linux-gnueabi binutils-arm-linux-gnueabi
+
+      - name: Download AOSP Clang (r383902)
+        run: |
+          mkdir -p clang
+          curl -LSs "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android12-release/clang-r383902.tar.gz" -o clang.tar.gz
+          tar -xzf clang.tar.gz -C clang
+          rm -f clang.tar.gz
+
+      - name: Clone Tree Wulan
+        run: |
+          git clone https://github.com/Mayuri-Chan/android_kernel_xiaomi_gale.git --depth=1 kernel-source || \
+          git clone https://github.com/wulan17/android_kernel_xiaomi_gale.git --depth=1 kernel-source
+
       - name: Inject MultiSU & Patch Configs
         run: |
           cd kernel-source
@@ -13,12 +44,11 @@
               f.write(new_content)
           '
 
-          # 2. Fix bug ret |= pr_info sound driver fs15xx
+          # 2. Fix bug ret |= pr_info pada sound driver fs15xx
           sed -i 's/ret |= pr_info/pr_info/g' sound/soc/codecs/fs15xx/fs15xx.c 2>/dev/null || true
 
           # 3. Injeksi MultiSU (MKSU)
-          curl -LSs "https://raw.githubusercontent.com/5ec1cff/KernelSU/main/kernel/setup.sh" | bash -s main || \
-          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5
+          curl -LSs "https://raw.githubusercontent.com/5ec1cff/KernelSU/main/kernel/setup.sh" | bash -s main
 
           DEFCONFIG=$(find arch/arm64/configs/ -name "*gale*defconfig" | head -n 1)
           if [ -z "$DEFCONFIG" ]; then
@@ -26,17 +56,70 @@
           fi
           echo "DEFCONFIG_NAME=$(basename $DEFCONFIG)" >> $GITHUB_ENV
 
-          # 4. Matikan lockdep
+          # 4. Matikan modul debugging lockdep
           sed -i '/CONFIG_LOCKDEP/d' $DEFCONFIG
           sed -i '/CONFIG_LOCKDEP_SUPPORT/d' $DEFCONFIG
           sed -i '/CONFIG_PROVE_LOCKING/d' $DEFCONFIG
           echo "# CONFIG_LOCKDEP is not set" >> $DEFCONFIG
           echo "# CONFIG_PROVE_LOCKING is not set" >> $DEFCONFIG
 
-          # 5. Konfigurasi KSU + Kprobes untuk 4.19 Non-GKI
+          # 5. Konfigurasi MultiSU & Kprobes untuk 4.19 Non-GKI
           echo "CONFIG_KSU=y" >> $DEFCONFIG
           echo "CONFIG_KPROBES=y" >> $DEFCONFIG
           echo "CONFIG_HAVE_KPROBES=y" >> $DEFCONFIG
           echo "CONFIG_KPROBE_EVENTS=y" >> $DEFCONFIG
           echo "CONFIG_OVERLAY_FS=y" >> $DEFCONFIG
+
+      - name: Compile Kernel
+        run: |
+          cd kernel-source
+          export PATH="${GITHUB_WORKSPACE}/clang/bin:$PATH"
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export KBUILD_BUILD_USER="zauksk"
+          export KBUILD_BUILD_HOST="Builder"
+
+          # 1. Defconfig
+          make O=out ARCH=arm64 \
+            CC=clang \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            $DEFCONFIG_NAME
+
+          # 2. Kompilasi kernel zauksk++
+          make -j$(nproc --all) O=out \
+            ARCH=arm64 \
+            LOCALVERSION="-zauksk++" \
+            CC=clang \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            KCFLAGS="-w" \
+            KCPPFLAGS="-w"
+
+      - name: Package with AnyKernel3
+        run: |
+          git clone https://github.com/osm0sis/AnyKernel3.git --depth=1 ak3
+
+          sed -i 's/device.name1=.*/device.name1=gale/g' ak3/anykernel.sh
+          sed -i 's/device.name2=.*/device.name2=gust/g' ak3/anykernel.sh
+          sed -i 's|block=.*|block=/dev/block/by-name/boot|g' ak3/anykernel.sh
+          sed -i 's/is_slot_device=.*/is_slot_device=auto/g' ak3/anykernel.sh
+
+          IMAGE_FILE=$(find kernel-source/out/arch/arm64/boot/ -type f \( -name "Image.gz-dtb" -o -name "Image.gz" -o -name "Image" \) | head -n 1)
+
+          if [ -z "$IMAGE_FILE" ]; then
+            echo "Kernel Image tidak ditemukan!"
+            exit 1
+          fi
+
+          cp "$IMAGE_FILE" ak3/$(basename "$IMAGE_FILE")
+          cd ak3
+          zip -r9 ../Kernel-Redmi13C-zauksk++-MultiSU.zip * -x .git README.md *placeholder
+
+      - name: Upload Kernel Zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: Kernel-Redmi13C-zauksk++-MultiSU
+          path: Kernel-Redmi13C-zauksk++-MultiSU.zip
           
