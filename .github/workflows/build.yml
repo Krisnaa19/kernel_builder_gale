@@ -136,6 +136,9 @@ jobs:
 
           make O=out ARCH=arm64 olddefconfig
 
+          echo "=== Final scheduler configuration ==="
+          grep -E 'CONFIG_(MQ_IOSCHED_ADIOS|MQ_IOSCHED_SSG|MQ_IOSCHED_SSG_CGROUP|NET_SCH_CAKE)' out/.config || true
+
           echo "=== Final kernel configuration ==="
 
           grep -E \
