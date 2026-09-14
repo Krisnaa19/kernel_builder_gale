@@ -1,4 +1,4 @@
-name: Build zauksk Kernel - CIP136 ST20
+name: Build #ice bear++ Kernel - CIP136 ST20
 
 on:
   workflow_dispatch:
@@ -8,10 +8,6 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-
-      # ============================================================
-      # CHECKOUT
-      # ============================================================
       - name: Checkout kernel source
         uses: actions/checkout@v4
         with:
@@ -19,52 +15,22 @@ jobs:
           ref: dev
           fetch-depth: 1
 
-      # ============================================================
-      # DEPENDENCIES
-      # ============================================================
       - name: Install dependencies
         run: |
           sudo apt-get update
-
           sudo apt-get install -y \
-            bc \
-            bison \
-            flex \
-            build-essential \
-            clang \
-            lld \
-            llvm \
-            gcc-aarch64-linux-gnu \
-            binutils-aarch64-linux-gnu \
-            libssl-dev \
-            libelf-dev \
-            libncurses5-dev \
-            libncurses-dev \
-            python3 \
-            python3-pip \
-            zip \
-            unzip \
-            cpio \
-            rsync \
-            git \
-            curl \
-            wget \
-            pahole
+            bc bison flex build-essential clang lld llvm \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            libssl-dev libelf-dev libncurses5-dev libncurses-dev \
+            python3 python3-pip zip unzip cpio rsync git curl wget pahole
 
-      # ============================================================
-      # AARCH64 GCC
-      # ============================================================
       - name: Install AArch64 GCC
         run: |
           sudo apt-get install -y gcc-aarch64-linux-gnu
 
-      # ============================================================
-      # CLANG R383902
-      # ============================================================
       - name: Install Clang r383902
         run: |
           mkdir -p "$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86"
-
           cd "$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86"
 
           curl -L --retry 5 --retry-delay 3 \
@@ -72,15 +38,9 @@ jobs:
             "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android12-release/clang-r383902.tar.gz"
 
           mkdir -p clang-r383902
-
-          tar -xzf clang-r383902.tar.gz \
-            -C clang-r383902
-
+          tar -xzf clang-r383902.tar.gz -C clang-r383902
           rm -f clang-r383902.tar.gz
 
-      # ============================================================
-      # VERIFY CLANG
-      # ============================================================
       - name: Verify Clang
         run: |
           export CLANG="$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/clang-r383902/bin"
@@ -94,84 +54,49 @@ jobs:
           "$CLANG/llvm-size" --version
           "$CLANG/llvm-strip" --version
 
-      # ============================================================
-      # VERIFY KERNEL BASE
-      # ============================================================
       - name: Verify kernel base
         run: |
-          echo "=========================================="
-          echo "KERNEL BASE"
-          echo "=========================================="
-
           grep -E '^(VERSION|PATCHLEVEL|SUBLEVEL|EXTRAVERSION)' Makefile
 
-          echo
           echo "CIP:"
           cat localversion-cip
 
-          echo
           echo "ST:"
           cat localversion-st
 
-          echo
-          echo "Expected:"
+          echo "Expected base version:"
           echo "4.19.325-cip136-st20"
 
-          echo "=========================================="
-
-      # ============================================================
-      # SETUP RESUKISU
-      # ============================================================
       - name: Setup ReSukiSU
         run: |
           curl -LSs \
             "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" \
             | bash
 
-      # ============================================================
-      # SETUP NOMOUNT
-      # ============================================================
       - name: Setup NoMount
         run: |
           curl -LSs \
             "https://raw.githubusercontent.com/maxsteeel/nomount/refs/heads/dev/kernel/setup.sh" \
             | bash -s dev
 
-      # ============================================================
-      # CHANGE ONLY KERNEL NAME
-      # ============================================================
-      - name: Rename kernel to zauksk
+      - name: Rename kernel to #ice bear++
         run: |
-          echo "Original LOCALVERSION:"
-          grep '^CONFIG_LOCALVERSION=' \
-            arch/arm64/configs/gale_defconfig || true
-
-          echo
-          echo "Changing:"
-          echo "CONFIG_LOCALVERSION=\"-Mayuri\""
-          echo "to:"
-          echo "CONFIG_LOCALVERSION=\"-zauksk\""
+          echo "Original CONFIG_LOCALVERSION:"
+          grep '^CONFIG_LOCALVERSION=' arch/arm64/configs/gale_defconfig || true
 
           sed -i \
-            's/^CONFIG_LOCALVERSION=.*/CONFIG_LOCALVERSION="-zauksk"/' \
+            's/^CONFIG_LOCALVERSION=.*/CONFIG_LOCALVERSION="-#ice bear++"/' \
             arch/arm64/configs/gale_defconfig
 
-          echo
-          echo "New LOCALVERSION:"
-          grep '^CONFIG_LOCALVERSION=' \
-            arch/arm64/configs/gale_defconfig
+          echo "New CONFIG_LOCALVERSION:"
+          grep '^CONFIG_LOCALVERSION=' arch/arm64/configs/gale_defconfig
 
-          echo
-          echo "Checking localversion files:"
           echo -n "CIP = "
           cat localversion-cip
 
           echo -n "ST  = "
           cat localversion-st
 
-      # ============================================================
-      # PREPARE KERNEL CONFIG
-      # ============================================================
       - name: Prepare kernel config
         run: |
           export ARCH=arm64
@@ -180,104 +105,74 @@ jobs:
 
           make O=out ARCH=arm64 gale_defconfig
 
-          # ReSukiSU Manual Hook
           scripts/config --file out/.config \
             --enable CONFIG_KSU
 
           scripts/config --file out/.config \
             --enable CONFIG_KSU_MANUAL_HOOK
 
-          # NoMount
           scripts/config --file out/.config \
             --enable CONFIG_NOMOUNT
 
-          # Clang r383902 tidak support LLVM Polly
+          # Clang r383902 tidak mendukung Polly
           scripts/config --file out/.config \
             --disable CONFIG_LLVM_POLLY
 
-          # Pastikan LOCALVERSION tetap zauksk
           scripts/config --file out/.config \
-            --set-str CONFIG_LOCALVERSION "-zauksk"
+            --set-str CONFIG_LOCALVERSION "-#ice bear++"
 
           scripts/config --file out/.config \
             --disable CONFIG_LOCALVERSION_AUTO
 
           make O=out ARCH=arm64 olddefconfig
 
-          echo
-          echo "=========================================="
-          echo "FINAL CONFIG"
-          echo "=========================================="
+          echo "=== Final kernel configuration ==="
 
           grep -E \
             'CONFIG_(LOCALVERSION|LOCALVERSION_AUTO|KSU|KSU_MANUAL_HOOK|NOMOUNT|LLVM_POLLY)' \
             out/.config || true
 
-          echo
-          echo "=========================================="
-          echo "KERNEL RELEASE"
-          echo "=========================================="
+          echo "=== Kernel release ==="
 
-          make -s --no-print-directory O=out ARCH=arm64 kernelrelease
+          make -s --no-print-directory \
+            O=out ARCH=arm64 kernelrelease
 
-      # ============================================================
-      # VERIFY RESUKISU
-      # ============================================================
       - name: Verify ReSukiSU Manual Hook
         run: |
-          grep -q '^CONFIG_KSU=y' \
-            out/.config
-
-          grep -q '^CONFIG_KSU_MANUAL_HOOK=y' \
-            out/.config
+          grep -q '^CONFIG_KSU=y' out/.config
+          grep -q '^CONFIG_KSU_MANUAL_HOOK=y' out/.config
 
           echo "ReSukiSU Manual Hook: OK"
 
-      # ============================================================
-      # VERIFY NOMOUNT
-      # ============================================================
       - name: Verify NoMount
         run: |
           test -d fs/nomount
 
-          grep -q '^CONFIG_NOMOUNT=y' \
-            out/.config
+          grep -q '^CONFIG_NOMOUNT=y' out/.config
 
           echo "NoMount: OK"
 
-      # ============================================================
-      # VERIFY FINAL VERSION
-      # ============================================================
       - name: Verify kernel version string
         run: |
-          VERSION="$(make -s --no-print-directory O=out ARCH=arm64 kernelrelease | grep -E '^[0-9]' | tr -d '\r\n')"
+          VERSION="$(make -s --no-print-directory \
+            O=out ARCH=arm64 kernelrelease \
+            | grep -E '^[0-9]' \
+            | tr -d '\r\n')"
 
-          echo
-          echo "=========================================="
-          echo "KERNEL RELEASE"
-          echo "=========================================="
-
+          echo "Actual:"
           echo "$VERSION"
 
-          echo
           echo "Expected:"
-          echo "4.19.325-cip136-st20-zauksk"
+          echo "4.19.325-cip136-st20-#ice bear++"
 
-          echo "=========================================="
-
-          if [ "$VERSION" != "4.19.325-cip136-st20-zauksk" ]; then
+          if [ "$VERSION" != "4.19.325-cip136-st20-#ice bear++" ]; then
             echo "ERROR: Kernel version mismatch!"
-            echo
-            echo "Actual:"
-            echo "$VERSION"
+            echo "Actual: $VERSION"
             exit 1
           fi
 
           echo "VERSION CHECK: PASS"
 
-      # ============================================================
-      # BUILD KERNEL
-      # ============================================================
       - name: Build kernel
         run: |
           export ARCH=arm64
@@ -307,30 +202,18 @@ jobs:
             CROSS_COMPILE=aarch64-linux-gnu- \
             Image.gz dtbs
 
-      # ============================================================
-      # FIND KERNEL IMAGE
-      # ============================================================
       - name: Find kernel image
         run: |
           if [ -f out/arch/arm64/boot/Image.gz ]; then
-            echo "Found Image.gz"
-
-            cp \
-              out/arch/arm64/boot/Image.gz \
-              Image.gz
+            cp out/arch/arm64/boot/Image.gz Image.gz
 
           elif [ -f out/arch/arm64/boot/Image ]; then
-            echo "Found Image"
-
-            cp \
-              out/arch/arm64/boot/Image \
-              Image
+            cp out/arch/arm64/boot/Image Image
 
           else
             echo "ERROR: Kernel image not found!"
 
-            find \
-              out/arch/arm64/boot \
+            find out/arch/arm64/boot \
               -maxdepth 2 \
               -type f \
               -print
@@ -338,65 +221,48 @@ jobs:
             exit 1
           fi
 
-      # ============================================================
-      # VERIFY BUILD
-      # ============================================================
       - name: Verify kernel build
         run: |
-          echo "=========================================="
-          echo "BUILD INFORMATION"
-          echo "=========================================="
+          echo "=== Kernel release ==="
 
-          echo
-          echo "Kernel release:"
-          make -s --no-print-directory O=out ARCH=arm64 kernelrelease
+          make -s --no-print-directory \
+            O=out ARCH=arm64 kernelrelease
 
-          echo
-          echo "Kernel version:"
-          make -s --no-print-directory O=out ARCH=arm64 kernelversion
+          echo "=== Kernel version ==="
 
-          echo
-          echo "Kernel image:"
+          make -s --no-print-directory \
+            O=out ARCH=arm64 kernelversion
+
+          echo "=== Kernel image ==="
+
           ls -lh Image* 2>/dev/null || true
 
-          echo
-          echo "Config:"
+          echo "=== Important config ==="
+
           grep -E \
             'CONFIG_(LOCALVERSION|LOCALVERSION_AUTO|KSU|KSU_MANUAL_HOOK|NOMOUNT|LLVM_POLLY)' \
             out/.config || true
 
-          echo "=========================================="
-
-      # ============================================================
-      # ANYKERNEL3
-      # ============================================================
       - name: Prepare AnyKernel3
         run: |
-          git clone \
-            --depth=1 \
+          git clone --depth=1 \
             https://github.com/osm0sis/AnyKernel3.git \
             anykernel
 
           rm -rf anykernel/.git
 
-      # ============================================================
-      # CONFIGURE ANYKERNEL3
-      # ============================================================
       - name: Configure AnyKernel3
         run: |
           cat > anykernel/anykernel.sh <<'EOF'
           properties() { '
-          kernel.string=zauksk Kernel - ReSukiSU - NoMount
-
+          kernel.string=#ice bear++ Kernel - ReSukiSU - NoMount
           do.devicecheck=1
           do.modules=0
           do.systemless=0
           do.cleanup=1
           do.cleanuponabort=0
-
           device.name1=gale
           device.name2=gust
-
           supported.versions=
           supported.patchlevels=
           supported.vendorpatchlevels=
@@ -410,13 +276,9 @@ jobs:
           . tools/ak3-core.sh;
 
           dump_boot;
-
           write_boot;
           EOF
 
-      # ============================================================
-      # COPY KERNEL
-      # ============================================================
       - name: Copy kernel to AnyKernel3
         run: |
           if [ -f Image.gz ]; then
@@ -426,13 +288,10 @@ jobs:
             cp Image anykernel/Image
 
           else
-            echo "ERROR: Kernel image missing"
+            echo "ERROR: Image/Image.gz missing"
             exit 1
           fi
 
-      # ============================================================
-      # CLEAN ANYKERNEL
-      # ============================================================
       - name: Clean AnyKernel3 package
         run: |
           cd anykernel
@@ -442,15 +301,13 @@ jobs:
           rm -f README.md
           rm -f ZAUKSK_BUILD_INFO.txt
 
-          echo "Final package files:"
+          echo "=== Final AnyKernel3 files ==="
+
           find . -maxdepth 2 -type f | sort
 
-      # ============================================================
-      # CREATE FLASHABLE ZIP
-      # ============================================================
       - name: Create flashable ZIP
         run: |
-          ZIP_NAME="zauksk-ReSukiSU-CIP136-ST20-gale.zip"
+          ZIP_NAME="ice-bear-ReSukiSU-CIP136-ST20-gale.zip"
 
           cd anykernel
 
@@ -477,89 +334,62 @@ jobs:
             exit 1
           fi
 
-          echo "Creating ZIP..."
-
-          zip -r9 \
-            "../$ZIP_NAME" \
-            "${FILES[@]}"
+          zip -r9 "../$ZIP_NAME" "${FILES[@]}"
 
           cd ..
 
           test -f "$ZIP_NAME"
 
-          echo
-          echo "ZIP created:"
+          echo "=== Flashable ZIP ==="
           ls -lh "$ZIP_NAME"
 
-      # ============================================================
-      # VALIDATE ZIP
-      # ============================================================
       - name: Validate final ZIP
         run: |
-          ZIP="zauksk-ReSukiSU-CIP136-ST20-gale.zip"
+          ZIP="ice-bear-ReSukiSU-CIP136-ST20-gale.zip"
 
           test -f "$ZIP"
 
-          echo "=========================================="
-          echo "ZIP CONTENT"
-          echo "=========================================="
+          echo "=== ZIP contents ==="
 
           unzip -l "$ZIP"
 
-          echo
-          echo "=========================================="
-          echo "CHECK REQUIRED FILES"
-          echo "=========================================="
+          echo "=== Required files ==="
 
           unzip -l "$ZIP" | grep -E \
             'META-INF/|modules/|patch/|ramdisk/|tools/|anykernel.sh|banner|Image.gz|Image'
 
-          echo
           echo "ZIP VALIDATION: PASS"
 
-      # ============================================================
-      # SHA256
-      # ============================================================
       - name: Generate SHA256
         run: |
           sha256sum \
-            zauksk-ReSukiSU-CIP136-ST20-gale.zip \
+            ice-bear-ReSukiSU-CIP136-ST20-gale.zip \
             > SHA256SUMS.txt
 
           cat SHA256SUMS.txt
 
-      # ============================================================
-      # UPLOAD
-      # ============================================================
       - name: Upload flashable ZIP
         uses: actions/upload-artifact@v4
         with:
-          name: zauksk-ReSukiSU-CIP136-ST20-gale-FLASHABLE
+          name: ice-bear-ReSukiSU-CIP136-ST20-gale-FLASHABLE
           path: |
-            zauksk-ReSukiSU-CIP136-ST20-gale.zip
+            ice-bear-ReSukiSU-CIP136-ST20-gale.zip
             SHA256SUMS.txt
 
-      # ============================================================
-      # COMPLETE
-      # ============================================================
       - name: Complete
         run: |
-          echo
-          echo "=========================================="
+          echo "========================================"
           echo "BUILD SUCCESS"
-          echo "=========================================="
+          echo "========================================"
 
-          echo
           echo "Kernel:"
-          make -s --no-print-directory O=out ARCH=arm64 kernelrelease
+          make -s --no-print-directory \
+            O=out ARCH=arm64 kernelrelease
 
-          echo
           echo "Expected:"
-          echo "4.19.325-cip136-st20-zauksk"
+          echo "4.19.325-cip136-st20-#ice bear++"
 
-          echo
           echo "ZIP:"
-          echo "zauksk-ReSukiSU-CIP136-ST20-gale.zip"
+          echo "ice-bear-ReSukiSU-CIP136-ST20-gale.zip"
 
-          echo "=========================================="
-          
+          echo "========================================"
