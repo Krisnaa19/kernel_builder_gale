@@ -3,29 +3,31 @@ name: Build zauksk - Redmi 13C
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   build:
-    name: Build Kernel
+    name: Build zauksk Kernel
     runs-on: ubuntu-22.04
+
+    env:
+      KERNEL_REPO: https://github.com/Mayuri-Chan/android_kernel_xiaomi_gale.git
+      KERNEL_BRANCH: lineage-22.2
+      DEFCONFIG: gale_defconfig
+      ARCH: arm64
+      KERNEL_NAME: zauksk
 
     steps:
 
-      # ==========================================
-      # CHECKOUT MAYURI KERNEL
-      # ==========================================
-      - name: Clone Mayuri Kernel
-        uses: actions/checkout@v4
-        with:
-          repository: Mayuri-Chan/android_kernel_xiaomi_gale
-          ref: lineage-22.2
-          fetch-depth: 1
-          path: kernel
+      # =========================================================
+      # 1. INSTALL DEPENDENCIES
+      # =========================================================
 
-      # ==========================================
-      # DEPENDENCIES
-      # ==========================================
       - name: Install dependencies
         run: |
+          set -eux
+
           sudo apt-get update
 
           sudo apt-get install -y \
@@ -48,112 +50,207 @@ jobs:
             wget \
             zip
 
-      # ==========================================
-      # INFORMATION
-      # ==========================================
-      - name: Kernel information
-        working-directory: kernel
+      # =========================================================
+      # 2. CLONE MAYURI KERNEL
+      # =========================================================
+
+      - name: Clone Mayuri Kernel
         run: |
-          echo "======================================"
-          echo "        ZAUKSK KERNEL BUILD"
-          echo "======================================"
+          set -eux
 
+          echo "=========================================="
+          echo "       CLONE MAYURI KERNEL"
+          echo "=========================================="
+
+          git clone \
+            --depth=1 \
+            --single-branch \
+            --branch "${KERNEL_BRANCH}" \
+            "${KERNEL_REPO}" \
+            kernel
+
+          cd kernel
+
+          echo
+          echo "Repository:"
+          git remote -v
+
+          echo
+          echo "Commit:"
           git log -1 --oneline
-          echo
-
-          echo "Defconfig:"
-          grep -n "CONFIG_LOCALVERSION" \
-            arch/arm64/configs/gale_defconfig || true
 
           echo
-          echo "Kernel:"
-          head -n 6 Makefile
+          echo "Branch:"
+          git branch -a
 
-      # ==========================================
-      # INSTALL RESUKISU
-      # ==========================================
-      - name: Install ReSukiSU
+          echo
+          echo "Checking defconfig..."
+
+          test -f "arch/arm64/configs/${DEFCONFIG}"
+
+          echo "Found:"
+          echo "arch/arm64/configs/${DEFCONFIG}"
+
+      # =========================================================
+      # 3. SHOW SOURCE INFORMATION
+      # =========================================================
+
+      - name: Kernel information
         working-directory: kernel
         run: |
           set -e
 
-          echo "Installing ReSukiSU..."
+          echo "=========================================="
+          echo "        KERNEL INFORMATION"
+          echo "=========================================="
+
+          echo "Repository:"
+          git remote get-url origin
+
+          echo
+          echo "Commit:"
+          git log -1 --format='%H'
+
+          echo
+          echo "Commit message:"
+          git log -1 --format='%s'
+
+          echo
+          echo "Kernel version:"
+          head -n 5 Makefile
+
+          echo
+          echo "Defconfig:"
+          grep -E \
+            'CONFIG_LOCALVERSION|CONFIG_KSU' \
+            "arch/arm64/configs/${DEFCONFIG}" \
+            || true
+
+      # =========================================================
+      # 4. SETUP RESUKISU
+      # =========================================================
+
+      - name: Install ReSukiSU
+        working-directory: kernel
+        run: |
+          set -eux
+
+          echo "=========================================="
+          echo "          INSTALL RESUKISU"
+          echo "=========================================="
 
           curl -LSs \
-            https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh \
+            "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" \
             | bash
 
-      # ==========================================
-      # VERIFY RESUKISU
-      # ==========================================
+          echo
+          echo "ReSukiSU setup completed."
+
+      # =========================================================
+      # 5. CHECK RESUKISU FILES
+      # =========================================================
+
       - name: Verify ReSukiSU
         working-directory: kernel
         run: |
-          echo "Checking ReSukiSU..."
+          set -e
+
+          echo "=========================================="
+          echo "         VERIFY RESUKISU"
+          echo "=========================================="
+
+          echo
+          echo "Searching KernelSU files..."
+
+          find . \
+            -maxdepth 3 \
+            \( -iname '*kernelsu*' -o -iname '*ksu*' \) \
+            | head -100 \
+            || true
+
+          echo
+          echo "Searching KSU configuration..."
 
           grep -R \
             "CONFIG_KSU" \
             arch/arm64/configs \
-            kernel \
-            2>/dev/null || true
+            2>/dev/null \
+            || true
 
-      # ==========================================
-      # PREPARE CONFIG
-      # ==========================================
+      # =========================================================
+      # 6. PREPARE CONFIG
+      # =========================================================
+
       - name: Prepare kernel config
         working-directory: kernel
         run: |
-          set -e
+          set -eux
+
+          echo "=========================================="
+          echo "       PREPARE KERNEL CONFIG"
+          echo "=========================================="
 
           mkdir -p out
 
-          echo "Using gale_defconfig"
+          echo
+          echo "Running ${DEFCONFIG}..."
 
           make \
             O=out \
-            ARCH=arm64 \
-            gale_defconfig
+            ARCH="${ARCH}" \
+            "${DEFCONFIG}"
 
           echo
-          echo "Applying zauksk configuration..."
+          echo "Setting kernel name to ${KERNEL_NAME}..."
 
           ./scripts/config \
             --file out/.config \
-            --set-str CONFIG_LOCALVERSION "-zauksk"
+            --set-str CONFIG_LOCALVERSION "-${KERNEL_NAME}"
 
-          # ReSukiSU
+          echo
+          echo "Enabling ReSukiSU..."
+
           ./scripts/config \
             --file out/.config \
             --enable CONFIG_KSU
 
-          # Manual Hook untuk kernel 4.19
-          if ./scripts/config --help 2>/dev/null | grep -q KSU_MANUAL_HOOK; then
-            ./scripts/config \
-              --file out/.config \
-              --enable CONFIG_KSU_MANUAL_HOOK
-          fi
+          echo
+          echo "Enabling Manual Hook..."
+
+          ./scripts/config \
+            --file out/.config \
+            --enable CONFIG_KSU_MANUAL_HOOK
+
+          echo
+          echo "Regenerating configuration..."
 
           make \
             O=out \
-            ARCH=arm64 \
+            ARCH="${ARCH}" \
             olddefconfig
 
           echo
-          echo "======================================"
-          echo "KERNEL CONFIG"
-          echo "======================================"
+          echo "=========================================="
+          echo "        FINAL KERNEL CONFIG"
+          echo "=========================================="
 
           grep -E \
-            "CONFIG_LOCALVERSION|CONFIG_KSU" \
-            out/.config || true
+            'CONFIG_LOCALVERSION|CONFIG_KSU' \
+            out/.config \
+            || true
 
-      # ==========================================
-      # BUILD
-      # ==========================================
+      # =========================================================
+      # 7. BUILD KERNEL
+      # =========================================================
+
       - name: Build kernel
         working-directory: kernel
         run: |
-          set -e
+          set -eux
+
+          echo "=========================================="
+          echo "          BUILD ZAUKSK"
+          echo "=========================================="
 
           export ARCH=arm64
           export SUBARCH=arm64
@@ -164,15 +261,23 @@ jobs:
           export CC=clang
           export LD=ld.lld
           export AR=llvm-ar
+          export AS=llvm-as
           export NM=llvm-nm
           export OBJCOPY=llvm-objcopy
           export OBJDUMP=llvm-objdump
           export READELF=llvm-readelf
           export STRIP=llvm-strip
 
-          echo "======================================"
-          echo "BUILDING ZAUKSK"
-          echo "======================================"
+          echo
+          echo "Compiler:"
+          clang --version
+
+          echo
+          echo "LLVM:"
+          llvm-config --version
+
+          echo
+          echo "Starting compilation..."
 
           make \
             -j"$(nproc)" \
@@ -181,17 +286,21 @@ jobs:
             LLVM=1 \
             LLVM_IAS=1
 
-      # ==========================================
-      # CHECK OUTPUT
-      # ==========================================
-      - name: Check kernel output
+      # =========================================================
+      # 8. CHECK BUILD OUTPUT
+      # =========================================================
+
+      - name: Check build output
         working-directory: kernel
         run: |
           set -e
 
-          echo "======================================"
-          echo "BUILD OUTPUT"
-          echo "======================================"
+          echo "=========================================="
+          echo "          BUILD OUTPUT"
+          echo "=========================================="
+
+          echo
+          echo "Boot directory:"
 
           find out/arch/arm64/boot \
             -maxdepth 3 \
@@ -199,91 +308,150 @@ jobs:
             | sort
 
           echo
+          echo "Checking Image.gz..."
 
-          if [ -f out/arch/arm64/boot/Image.gz ]; then
-            echo "SUCCESS: Image.gz found"
-          else
-            echo "ERROR: Image.gz not found"
+          if [ ! -f out/arch/arm64/boot/Image.gz ]; then
+            echo "::error::Image.gz tidak ditemukan!"
             exit 1
           fi
 
-      # ==========================================
-      # COLLECT
-      # ==========================================
-      - name: Prepare artifacts
+          echo "Image.gz found."
+
+          echo
+          echo "Kernel size:"
+
+          ls -lh \
+            out/arch/arm64/boot/Image.gz
+
+      # =========================================================
+      # 9. PREPARE RELEASE FILES
+      # =========================================================
+
+      - name: Prepare release
         working-directory: kernel
         run: |
-          set -e
+          set -eux
 
-          mkdir -p ../zauksk
+          echo "=========================================="
+          echo "        PREPARE RELEASE"
+          echo "=========================================="
 
+          rm -rf ../release
+
+          mkdir -p ../release
+
+          # Kernel image
           cp \
             out/arch/arm64/boot/Image.gz \
-            ../zauksk/
+            ../release/Image.gz
 
+          # DTB
           if [ -d out/arch/arm64/boot/dts ]; then
             cp -r \
               out/arch/arm64/boot/dts \
-              ../zauksk/
+              ../release/dts
           fi
 
+          # Final config
           cp \
             out/.config \
-            ../zauksk/
+            ../release/kernel.config
 
-          echo "zauksk" \
-            > ../zauksk/kernel-name.txt
+          # Build information
+          cat > ../release/build-info.txt <<EOF
+Kernel name : zauksk
+Device      : Redmi 13C / POCO C65
+Codename    : gale / gust
+Kernel      : Linux 4.19
+Source      : ${KERNEL_REPO}
+Branch      : ${KERNEL_BRANCH}
+Defconfig   : ${DEFCONFIG}
+Root        : ReSukiSU
+Hook        : Manual Hook
+Architecture: arm64
+EOF
 
-          echo "Mayuri-Chan/android_kernel_xiaomi_gale" \
-            > ../zauksk/source.txt
+          echo
+          echo "Release files:"
 
-          echo "lineage-22.2" \
-            > ../zauksk/branch.txt
+          find ../release \
+            -type f \
+            -print \
+            | sort
 
-      # ==========================================
-      # CREATE ZIP
-      # ==========================================
+      # =========================================================
+      # 10. CREATE SIMPLE ZIP
+      # =========================================================
+
       - name: Create kernel ZIP
         run: |
-          cd zauksk
+          set -eux
+
+          cd release
 
           zip -r \
             ../zauksk-ReSukiSU-gale.zip \
-            Image.gz \
-            dts \
-            .config \
-            kernel-name.txt \
-            source.txt \
-            branch.txt
+            .
 
-      # ==========================================
-      # UPLOAD ARTIFACT
-      # ==========================================
-      - name: Upload kernel
+          cd ..
+
+          echo
+          echo "ZIP created:"
+
+          ls -lh \
+            zauksk-ReSukiSU-gale.zip
+
+      # =========================================================
+      # 11. GENERATE SHA256
+      # =========================================================
+
+      - name: Generate SHA256
+        run: |
+          set -eux
+
+          sha256sum \
+            release/Image.gz \
+            zauksk-ReSukiSU-gale.zip \
+            > SHA256SUMS.txt
+
+          cat SHA256SUMS.txt
+
+      # =========================================================
+      # 12. UPLOAD ARTIFACT
+      # =========================================================
+
+      - name: Upload kernel artifact
         uses: actions/upload-artifact@v4
         with:
           name: zauksk-ReSukiSU-gale
           path: |
-            zauksk/
+            release/
             zauksk-ReSukiSU-gale.zip
+            SHA256SUMS.txt
           if-no-files-found: error
 
-      # ==========================================
-      # SUMMARY
-      # ==========================================
+      # =========================================================
+      # 13. SUMMARY
+      # =========================================================
+
       - name: Build summary
         run: |
-          echo "======================================"
-          echo "       BUILD SUCCESS"
-          echo "======================================"
           echo
-          echo "Device : Redmi 13C / POCO C65"
-          echo "Codename : gale / gust"
-          echo "Kernel : 4.19"
-          echo "Name : zauksk"
-          echo "Root : ReSukiSU"
-          echo "Config : gale_defconfig"
+          echo "=========================================="
+          echo "          BUILD SUCCESS"
+          echo "=========================================="
           echo
-          echo "Download artifact:"
-          echo "zauksk-ReSukiSU-gale"
-          echo "======================================"
+          echo "Device       : Redmi 13C / POCO C65"
+          echo "Codename     : gale / gust"
+          echo "Kernel       : Linux 4.19"
+          echo "Kernel name  : zauksk"
+          echo "Root         : ReSukiSU"
+          echo "Hook         : Manual Hook"
+          echo "Defconfig    : gale_defconfig"
+          echo "Branch       : lineage-22.2"
+          echo
+          echo "Output:"
+          echo "  Image.gz"
+          echo "  zauksk-ReSukiSU-gale.zip"
+          echo
+          echo "=========================================="
