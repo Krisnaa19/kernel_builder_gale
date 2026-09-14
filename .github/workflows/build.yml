@@ -76,8 +76,8 @@ jobs:
       - name: Setup NoMount
         run: |
           curl -LSs \
-            "https://raw.githubusercontent.com/maxsteeel/nomount/refs/heads/dev/kernel/setup.sh" \
-            | bash -s dev
+            "https://raw.githubusercontent.com/maxsteeel/nomount/v2.0.0/kernel/setup.sh" \
+            | bash -s v2.0.0
 
       - name: Rename kernel to #ice bear++
         run: |
