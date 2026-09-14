@@ -1,4 +1,4 @@
-name: Build zauksk Kernel
+name: Build zauksk + ReSukiSU
 
 on:
   workflow_dispatch:
@@ -8,14 +8,14 @@ permissions:
 
 jobs:
   build:
-    name: zauksk + ReSukiSU
+    name: zauksk Kernel
     runs-on: ubuntu-22.04
     timeout-minutes: 90
 
     steps:
 
       # ============================================================
-      # 1. DEPENDENCIES
+      # 1. INSTALL DEPENDENCIES
       # ============================================================
       - name: Install dependencies
         run: |
@@ -46,20 +46,20 @@ jobs:
             build-essential
 
       # ============================================================
-      # 2. CLONE NEW SOURCE TREE
+      # 2. CLONE SOURCE TREE
       #
       # SOURCE:
-      # xxblebleblexx/android_kernel_xiaomi_gale
+      # https://github.com/xxblebleblexx/android_kernel_xiaomi_gale
       #
       # BRANCH:
       # dev
       # ============================================================
-      - name: Clone Moonbeam Kernel
+      - name: Clone Kernel Source
         run: |
           set -eux
 
           echo "=========================================="
-          echo "CLONE MOONBEAM KERNEL"
+          echo "CLONE KERNEL SOURCE"
           echo "=========================================="
 
           git clone \
@@ -71,14 +71,18 @@ jobs:
 
           cd kernel
 
-          echo "Remote:"
-          git remote -v
+          echo "=========================================="
+          echo "SOURCE INFORMATION"
+          echo "=========================================="
 
           echo "Branch:"
           git branch --show-current
 
           echo "Commit:"
           git log -1 --oneline
+
+          echo "Remote:"
+          git remote -v
 
           echo "=========================================="
           echo "VERIFY TREE"
@@ -92,36 +96,44 @@ jobs:
           echo "OK: gale_defconfig"
           echo "OK: build.config.mtk.aarch64"
 
-          echo "=========================================="
-          echo "KERNEL VERSION"
-          echo "=========================================="
-
+          echo "Kernel version:"
           make kernelversion
 
       # ============================================================
-      # 3. SHOW ORIGINAL BUILD CONFIG
+      # 3. VERIFY GALE DEFCONFIG
       # ============================================================
-      - name: Verify build configuration
+      - name: Verify gale_defconfig
         working-directory: kernel
         run: |
           set -eux
 
           echo "=========================================="
-          echo "BUILD.CONFIG.MTK.AARCH64"
+          echo "VERIFY GALE DEFCONFIG"
+          echo "=========================================="
+
+          grep -E \
+            'CONFIG_LOCALVERSION=|CONFIG_MACH_MT6768=|CONFIG_ARCH_MTK_PROJECT=|CONFIG_NR_CPUS=|CONFIG_LTO=|CONFIG_LTO_CLANG=|CONFIG_THINLTO=' \
+            arch/arm64/configs/gale_defconfig \
+            || true
+
+          echo "gale_defconfig exists and is readable."
+
+      # ============================================================
+      # 4. SHOW BUILD CONFIG
+      # ============================================================
+      - name: Verify build.config.mtk.aarch64
+        working-directory: kernel
+        run: |
+          set -eux
+
+          echo "=========================================="
+          echo "BUILD CONFIG"
           echo "=========================================="
 
           cat build.config.mtk.aarch64
 
-          echo "=========================================="
-          echo "GALE DEFCONFIG"
-          echo "=========================================="
-
-          grep -E \
-            'CONFIG_LOCALVERSION=|CONFIG_MACH_MT6768=|CONFIG_ARCH_MTK_PROJECT=|CONFIG_NR_CPUS=|CONFIG_BUILD_ARM64|CONFIG_LTO=|CONFIG_LTO_CLANG=|CONFIG_THINLTO=|CONFIG_CFI_CLANG=|CONFIG_SHADOW_CALL_STACK=' \
-            arch/arm64/configs/gale_defconfig
-
       # ============================================================
-      # 4. INSTALL RESUKISU
+      # 5. INSTALL RESUKISU
       # ============================================================
       - name: Install ReSukiSU
         working-directory: kernel
@@ -136,21 +148,12 @@ jobs:
             "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" \
             | bash
 
-          echo "=========================================="
-          echo "VERIFY RESUKISU"
-          echo "=========================================="
-
           test -d KernelSU
 
-          echo "KernelSU directory exists."
-
-          find KernelSU \
-            -maxdepth 2 \
-            -type f \
-            | head -50
+          echo "ReSukiSU installed successfully."
 
       # ============================================================
-      # 5. VERIFY MANUAL HOOK
+      # 6. VERIFY MANUAL HOOK
       # ============================================================
       - name: Verify ReSukiSU Manual Hook
         working-directory: kernel
@@ -158,14 +161,8 @@ jobs:
           set -eux
 
           echo "=========================================="
-          echo "SEARCH MANUAL HOOK"
+          echo "VERIFY MANUAL HOOK"
           echo "=========================================="
-
-          grep -R \
-            "KSU_MANUAL_HOOK" \
-            KernelSU \
-            2>/dev/null \
-            | head -30 || true
 
           if grep -Rqs \
             "config KSU_MANUAL_HOOK" \
@@ -176,18 +173,18 @@ jobs:
           else
 
             echo "ERROR:"
-            echo "CONFIG_KSU_MANUAL_HOOK does not exist in installed ReSukiSU."
+            echo "CONFIG_KSU_MANUAL_HOOK was not found."
 
             exit 1
-
           fi
 
       # ============================================================
-      # 6. DOWNLOAD EXACT CLANG R383902
+      # 7. DOWNLOAD CLANG R383902
       #
-      # Tree build.config.mtk.aarch64 explicitly requests:
+      # IMPORTANT:
+      # Do NOT use git sparse-checkout.
       #
-      # clang-r383902
+      # Download the exact compiler directly from AOSP.
       # ============================================================
       - name: Install Clang r383902
         run: |
@@ -197,39 +194,49 @@ jobs:
           echo "INSTALL ANDROID CLANG R383902"
           echo "=========================================="
 
-          mkdir -p "$HOME/toolchains"
+          mkdir -p "$HOME/toolchains/clang-r383902"
 
-          git clone \
-            --depth=1 \
-            --filter=blob:none \
-            --sparse \
-            https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 \
-            "$HOME/toolchains/clang"
+          cd "$HOME/toolchains/clang-r383902"
 
-          cd "$HOME/toolchains/clang"
+          curl -L \
+            --retry 5 \
+            --retry-delay 3 \
+            -o clang-r383902.tar.gz \
+            "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android12-release/clang-r383902.tar.gz"
 
-          git sparse-checkout set clang-r383902
+          test -s clang-r383902.tar.gz
 
-          test -x clang-r383902/bin/clang
-          test -x clang-r383902/bin/ld.lld
+          echo "Extracting Clang..."
 
-          echo "=========================================="
-          echo "CLANG VERSION"
-          echo "=========================================="
+          tar \
+            -xzf \
+            clang-r383902.tar.gz
 
-          clang-r383902/bin/clang --version
+          rm -f clang-r383902.tar.gz
 
           echo "=========================================="
-          echo "LLD VERSION"
+          echo "VERIFY CLANG"
           echo "=========================================="
 
-          clang-r383902/bin/ld.lld --version
+          test -x bin/clang
+          test -x bin/ld.lld
+          test -x bin/llvm-ar
+          test -x bin/llvm-nm
+          test -x bin/llvm-objcopy
+          test -x bin/llvm-objdump
+          test -x bin/llvm-size
+          test -x bin/llvm-strip
+
+          echo "Clang:"
+          bin/clang --version
+
+          echo "LLD:"
+          bin/ld.lld --version
+
+          echo "Clang r383902 installation OK."
 
       # ============================================================
-      # 7. PREPARE CONFIGURATION
-      #
-      # IMPORTANT:
-      # We NEVER run plain "make" before config is ready.
+      # 8. PREPARE KERNEL CONFIG
       # ============================================================
       - name: Prepare kernel configuration
         working-directory: kernel
@@ -240,12 +247,15 @@ jobs:
           echo "PREPARE KERNEL CONFIG"
           echo "=========================================="
 
-          export PATH="$HOME/toolchains/clang/clang-r383902/bin:$PATH"
+          export CLANG="$HOME/toolchains/clang-r383902"
 
-          export LD_LIBRARY_PATH="$HOME/toolchains/clang/clang-r383902/lib64:${LD_LIBRARY_PATH:-}"
+          export PATH="$CLANG/bin:$PATH"
+
+          export LD_LIBRARY_PATH="$CLANG/lib64:${LD_LIBRARY_PATH:-}"
 
           export ARCH=arm64
           export SUBARCH=arm64
+
           export CROSS_COMPILE=aarch64-linux-gnu-
 
           export LLVM=1
@@ -269,10 +279,10 @@ jobs:
 
           test -f out/.config
 
-          echo "gale_defconfig OK."
+          echo "gale_defconfig completed."
 
           # --------------------------------------------------------
-          # Set kernel name
+          # Kernel name
           # --------------------------------------------------------
 
           scripts/config \
@@ -280,7 +290,7 @@ jobs:
             --set-str LOCALVERSION "-zauksk"
 
           # --------------------------------------------------------
-          # Enable KSU
+          # ReSukiSU
           # --------------------------------------------------------
 
           scripts/config \
@@ -288,17 +298,12 @@ jobs:
             --enable CONFIG_KSU
 
           # --------------------------------------------------------
-          # Enable Manual Hook
+          # Manual Hook
           # --------------------------------------------------------
 
           scripts/config \
             --file out/.config \
             --enable CONFIG_KSU_MANUAL_HOOK
-
-          # --------------------------------------------------------
-          # Make sure required KSU dependencies are handled
-          # without interactive prompts.
-          # --------------------------------------------------------
 
           echo "=========================================="
           echo "RUN OLDDEFCONFIG"
@@ -312,27 +317,31 @@ jobs:
             LLVM_IAS=1 \
             olddefconfig
 
-          # --------------------------------------------------------
-          # Required generated configuration
-          # --------------------------------------------------------
+          echo "=========================================="
+          echo "VERIFY FINAL CONFIG"
+          echo "=========================================="
 
           test -f out/.config
           test -f out/include/config/auto.conf
 
-          echo "=========================================="
-          echo "FINAL CONFIG CHECK"
-          echo "=========================================="
+          grep \
+            'CONFIG_KSU=y' \
+            out/.config
 
-          grep -E \
-            'CONFIG_LOCALVERSION=|CONFIG_KSU=|CONFIG_KSU_MANUAL_HOOK=|CONFIG_MACH_MT6768=|CONFIG_ARCH_MTK_PROJECT=|CONFIG_NR_CPUS=' \
+          grep \
+            'CONFIG_KSU_MANUAL_HOOK=y' \
+            out/.config
+
+          grep \
+            'CONFIG_LOCALVERSION="-zauksk"' \
             out/.config
 
           echo "=========================================="
-          echo "CONFIG READY"
+          echo "FINAL CONFIG OK"
           echo "=========================================="
 
       # ============================================================
-      # 8. BUILD KERNEL
+      # 9. BUILD KERNEL
       # ============================================================
       - name: Build kernel
         working-directory: kernel
@@ -343,9 +352,11 @@ jobs:
           echo "BUILD KERNEL"
           echo "=========================================="
 
-          export PATH="$HOME/toolchains/clang/clang-r383902/bin:$PATH"
+          export CLANG="$HOME/toolchains/clang-r383902"
 
-          export LD_LIBRARY_PATH="$HOME/toolchains/clang/clang-r383902/lib64:${LD_LIBRARY_PATH:-}"
+          export PATH="$CLANG/bin:$PATH"
+
+          export LD_LIBRARY_PATH="$CLANG/lib64:${LD_LIBRARY_PATH:-}"
 
           export ARCH=arm64
           export SUBARCH=arm64
@@ -355,17 +366,16 @@ jobs:
           export LLVM=1
           export LLVM_IAS=1
 
+          export KCONFIG_NOSILENTUPDATE=1
+
           export CC=clang
           export LD=ld.lld
           export AR=llvm-ar
           export NM=llvm-nm
           export OBJCOPY=llvm-objcopy
           export OBJDUMP=llvm-objdump
-          export READELF=llvm-readelf
           export OBJSIZE=llvm-size
           export STRIP=llvm-strip
-
-          export KCONFIG_NOSILENTUPDATE=1
 
           test -f out/.config
           test -f out/include/config/auto.conf
@@ -378,7 +388,7 @@ jobs:
           ld.lld --version
 
           echo "=========================================="
-          echo "START COMPILATION"
+          echo "START BUILD"
           echo "=========================================="
 
           make \
@@ -393,7 +403,6 @@ jobs:
             NM=llvm-nm \
             OBJCOPY=llvm-objcopy \
             OBJDUMP=llvm-objdump \
-            READELF=llvm-readelf \
             OBJSIZE=llvm-size \
             STRIP=llvm-strip \
             KCONFIG_NOSILENTUPDATE=1 \
@@ -404,7 +413,7 @@ jobs:
           echo "=========================================="
 
       # ============================================================
-      # 9. CHECK IMAGE
+      # 10. CHECK KERNEL IMAGE
       # ============================================================
       - name: Check kernel image
         working-directory: kernel
@@ -417,13 +426,17 @@ jobs:
 
           if [ -f out/arch/arm64/boot/Image.gz ]; then
 
-            echo "FOUND: Image.gz"
-            ls -lh out/arch/arm64/boot/Image.gz
+            echo "FOUND Image.gz"
+
+            ls -lh \
+              out/arch/arm64/boot/Image.gz
 
           elif [ -f out/arch/arm64/boot/Image ]; then
 
-            echo "FOUND: Image"
-            ls -lh out/arch/arm64/boot/Image
+            echo "FOUND Image"
+
+            ls -lh \
+              out/arch/arm64/boot/Image
 
           else
 
@@ -440,7 +453,7 @@ jobs:
           fi
 
       # ============================================================
-      # 10. CLONE ANYKERNEL3
+      # 11. CLONE ANYKERNEL3
       # ============================================================
       - name: Clone AnyKernel3
         run: |
@@ -451,10 +464,11 @@ jobs:
             https://github.com/osm0sis/AnyKernel3.git \
             AnyKernel3
 
-          test -f AnyKernel3/tools/ak3-core.sh
+          test -f \
+            AnyKernel3/tools/ak3-core.sh
 
       # ============================================================
-      # 11. COPY IMAGE
+      # 12. COPY KERNEL IMAGE
       # ============================================================
       - name: Copy kernel image
         run: |
@@ -480,17 +494,20 @@ jobs:
 
           else
 
-            echo "ERROR: no kernel image."
+            echo "ERROR: kernel image missing."
 
             exit 1
 
           fi
 
-          echo "Kernel image copied:"
+          echo "=========================================="
+          echo "KERNEL IMAGE"
+          echo "=========================================="
+
           ls -lh AnyKernel3/Image*
 
       # ============================================================
-      # 12. CONFIGURE ANYKERNEL3
+      # 13. CONFIGURE ANYKERNEL3
       # ============================================================
       - name: Configure AnyKernel3
         run: |
@@ -501,7 +518,6 @@ jobs:
           cat > anykernel.sh <<'EOF'
           ### AnyKernel3
           ### zauksk + ReSukiSU
-          ### Moonbeam Kernel
           ### Redmi 13C / POCO C65
           ### gale / gust
 
@@ -542,7 +558,7 @@ jobs:
           cat anykernel.sh
 
       # ============================================================
-      # 13. BUILD INFO
+      # 14. BUILD INFORMATION
       # ============================================================
       - name: Add build information
         run: |
@@ -554,7 +570,6 @@ jobs:
           zauksk Kernel
           ReSukiSU
           Manual Hook
-          Moonbeam Kernel
           Redmi 13C / POCO C65
           gale / gust
           Linux 4.19
@@ -566,13 +581,13 @@ jobs:
           Hook: Manual Hook
 
           Source:
-          https://github.com/xxblebleblexx/android_kernel_xiaomi_gale
+          xxblebleblexx/android_kernel_xiaomi_gale
 
           Branch:
           dev
 
-          Kernel:
-          Linux 4.19
+          Defconfig:
+          gale_defconfig
 
           Device:
           Redmi 13C / POCO C65
@@ -580,11 +595,11 @@ jobs:
           Codename:
           gale / gust
 
-          Defconfig:
-          gale_defconfig
-
           Architecture:
           arm64
+
+          Linux:
+          4.19
 
           Compiler:
           Android Clang r383902
@@ -593,7 +608,7 @@ jobs:
           cat build-info.txt
 
       # ============================================================
-      # 14. CREATE FLASHABLE ZIP
+      # 15. CREATE FLASHABLE ZIP
       # ============================================================
       - name: Create flashable ZIP
         run: |
@@ -604,36 +619,37 @@ jobs:
           cd AnyKernel3
 
           zip -r9 \
-            ../release/zauksk-ReSukiSU-Moonbeam-gale.zip \
+            ../release/zauksk-ReSukiSU-gale.zip \
             . \
             -x ".git/*" \
             -x ".github/*"
 
           cd ..
 
-          test -f release/zauksk-ReSukiSU-Moonbeam-gale.zip
+          test -f \
+            release/zauksk-ReSukiSU-gale.zip
 
           echo "=========================================="
           echo "FLASHABLE ZIP CREATED"
           echo "=========================================="
 
           ls -lh \
-            release/zauksk-ReSukiSU-Moonbeam-gale.zip
+            release/zauksk-ReSukiSU-gale.zip
 
       # ============================================================
-      # 15. TEST ZIP
+      # 16. VERIFY ZIP
       # ============================================================
       - name: Verify ZIP
         run: |
           set -eux
 
           unzip -t \
-            release/zauksk-ReSukiSU-Moonbeam-gale.zip
+            release/zauksk-ReSukiSU-gale.zip
 
           echo "ZIP TEST PASSED."
 
       # ============================================================
-      # 16. SHA256
+      # 17. SHA256
       # ============================================================
       - name: Generate SHA256
         run: |
@@ -642,20 +658,20 @@ jobs:
           cd release
 
           sha256sum \
-            zauksk-ReSukiSU-Moonbeam-gale.zip \
+            zauksk-ReSukiSU-gale.zip \
             > SHA256SUMS.txt
 
           cat SHA256SUMS.txt
 
       # ============================================================
-      # 17. UPLOAD ONLY ZIP
+      # 18. UPLOAD ONLY FLASHABLE ZIP
       # ============================================================
       - name: Upload flashable ZIP
         uses: actions/upload-artifact@v4
         with:
-          name: zauksk-ReSukiSU-Moonbeam-gale-FLASHABLE
+          name: zauksk-ReSukiSU-gale-FLASHABLE
           path: |
-            release/zauksk-ReSukiSU-Moonbeam-gale.zip
+            release/zauksk-ReSukiSU-gale.zip
             release/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 14
