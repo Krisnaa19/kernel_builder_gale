@@ -1,125 +1,289 @@
-name: Build Redmi 13C Kernel - zauksk++ MultiSU
+name: Build zauksk - Redmi 13C
 
 on:
   workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
-    container:
-      image: ubuntu:20.04
+    name: Build Kernel
+    runs-on: ubuntu-22.04
 
     steps:
-      - name: Setup Build Environment (Ubuntu 20.04 Native GCC 9)
-        env:
-          DEBIAN_FRONTEND: noninteractive
+
+      # ==========================================
+      # CHECKOUT MAYURI KERNEL
+      # ==========================================
+      - name: Clone Mayuri Kernel
+        uses: actions/checkout@v4
+        with:
+          repository: Mayuri-Chan/android_kernel_xiaomi_gale
+          ref: lineage-22.2
+          fetch-depth: 1
+          path: kernel
+
+      # ==========================================
+      # DEPENDENCIES
+      # ==========================================
+      - name: Install dependencies
         run: |
-          apt-get update
-          apt-get install -y git curl zip bc bison flex build-essential libssl-dev libelf-dev libncurses-dev ccache python3 gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu gcc-arm-linux-gnueabi binutils-arm-linux-gnueabi
+          sudo apt-get update
 
-      - name: Download AOSP Clang (r383902)
+          sudo apt-get install -y \
+            bc \
+            bison \
+            build-essential \
+            ccache \
+            clang \
+            curl \
+            flex \
+            git \
+            libelf-dev \
+            libssl-dev \
+            lld \
+            llvm \
+            python3 \
+            python-is-python3 \
+            rsync \
+            unzip \
+            wget \
+            zip
+
+      # ==========================================
+      # INFORMATION
+      # ==========================================
+      - name: Kernel information
+        working-directory: kernel
         run: |
-          mkdir -p clang
-          curl -LSs "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android12-release/clang-r383902.tar.gz" -o clang.tar.gz
-          tar -xzf clang.tar.gz -C clang
-          rm -f clang.tar.gz
+          echo "======================================"
+          echo "        ZAUKSK KERNEL BUILD"
+          echo "======================================"
 
-      - name: Clone Tree Wulan
+          git log -1 --oneline
+          echo
+
+          echo "Defconfig:"
+          grep -n "CONFIG_LOCALVERSION" \
+            arch/arm64/configs/gale_defconfig || true
+
+          echo
+          echo "Kernel:"
+          head -n 6 Makefile
+
+      # ==========================================
+      # INSTALL RESUKISU
+      # ==========================================
+      - name: Install ReSukiSU
+        working-directory: kernel
         run: |
-          git clone https://github.com/Mayuri-Chan/android_kernel_xiaomi_gale.git --depth=1 kernel-source || \
-          git clone https://github.com/wulan17/android_kernel_xiaomi_gale.git --depth=1 kernel-source
+          set -e
 
-      - name: Inject MultiSU & Patch Configs
+          echo "Installing ReSukiSU..."
+
+          curl -LSs \
+            https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh \
+            | bash
+
+      # ==========================================
+      # VERIFY RESUKISU
+      # ==========================================
+      - name: Verify ReSukiSU
+        working-directory: kernel
         run: |
-          cd kernel-source
+          echo "Checking ReSukiSU..."
 
-          # 1. Bypass bug FUSE BTAG
-          python3 -c '
-          import re
-          path = "fs/fuse/file.c"
-          with open(path, "r") as f:
-              content = f.read()
-          new_content = re.sub(r"mtk_btag_pidlog_set_pid_pages\s*\([^;]*\);", "/* bypassed mtk_btag */", content)
-          with open(path, "w") as f:
-              f.write(new_content)
-          '
+          grep -R \
+            "CONFIG_KSU" \
+            arch/arm64/configs \
+            kernel \
+            2>/dev/null || true
 
-          # 2. Fix bug ret |= pr_info pada sound driver fs15xx
-          sed -i 's/ret |= pr_info/pr_info/g' sound/soc/codecs/fs15xx/fs15xx.c 2>/dev/null || true
+      # ==========================================
+      # PREPARE CONFIG
+      # ==========================================
+      - name: Prepare kernel config
+        working-directory: kernel
+        run: |
+          set -e
 
-          # 3. Injeksi MultiSU (MKSU)
-          curl -LSs "https://raw.githubusercontent.com/5ec1cff/KernelSU/main/kernel/setup.sh" | bash -s main
+          mkdir -p out
 
-          DEFCONFIG=$(find arch/arm64/configs/ -name "*gale*defconfig" | head -n 1)
-          if [ -z "$DEFCONFIG" ]; then
-            DEFCONFIG="arch/arm64/configs/gale_defconfig"
+          echo "Using gale_defconfig"
+
+          make \
+            O=out \
+            ARCH=arm64 \
+            gale_defconfig
+
+          echo
+          echo "Applying zauksk configuration..."
+
+          ./scripts/config \
+            --file out/.config \
+            --set-str CONFIG_LOCALVERSION "-zauksk"
+
+          # ReSukiSU
+          ./scripts/config \
+            --file out/.config \
+            --enable CONFIG_KSU
+
+          # Manual Hook untuk kernel 4.19
+          if ./scripts/config --help 2>/dev/null | grep -q KSU_MANUAL_HOOK; then
+            ./scripts/config \
+              --file out/.config \
+              --enable CONFIG_KSU_MANUAL_HOOK
           fi
-          echo "DEFCONFIG_NAME=$(basename $DEFCONFIG)" >> $GITHUB_ENV
 
-          # 4. Matikan modul debugging lockdep
-          sed -i '/CONFIG_LOCKDEP/d' $DEFCONFIG
-          sed -i '/CONFIG_LOCKDEP_SUPPORT/d' $DEFCONFIG
-          sed -i '/CONFIG_PROVE_LOCKING/d' $DEFCONFIG
-          echo "# CONFIG_LOCKDEP is not set" >> $DEFCONFIG
-          echo "# CONFIG_PROVE_LOCKING is not set" >> $DEFCONFIG
+          make \
+            O=out \
+            ARCH=arm64 \
+            olddefconfig
 
-          # 5. Konfigurasi MultiSU & Kprobes untuk 4.19 Non-GKI
-          echo "CONFIG_KSU=y" >> $DEFCONFIG
-          echo "CONFIG_KPROBES=y" >> $DEFCONFIG
-          echo "CONFIG_HAVE_KPROBES=y" >> $DEFCONFIG
-          echo "CONFIG_KPROBE_EVENTS=y" >> $DEFCONFIG
-          echo "CONFIG_OVERLAY_FS=y" >> $DEFCONFIG
+          echo
+          echo "======================================"
+          echo "KERNEL CONFIG"
+          echo "======================================"
 
-      - name: Compile Kernel
+          grep -E \
+            "CONFIG_LOCALVERSION|CONFIG_KSU" \
+            out/.config || true
+
+      # ==========================================
+      # BUILD
+      # ==========================================
+      - name: Build kernel
+        working-directory: kernel
         run: |
-          cd kernel-source
-          export PATH="${GITHUB_WORKSPACE}/clang/bin:$PATH"
+          set -e
+
           export ARCH=arm64
           export SUBARCH=arm64
-          export KBUILD_BUILD_USER="zauksk"
-          export KBUILD_BUILD_HOST="Builder"
 
-          # 1. Defconfig
-          make O=out ARCH=arm64 \
-            CC=clang \
-            CROSS_COMPILE=aarch64-linux-gnu- \
-            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
-            $DEFCONFIG_NAME
+          export LLVM=1
+          export LLVM_IAS=1
 
-          # 2. Kompilasi kernel zauksk++
-          make -j$(nproc --all) O=out \
+          export CC=clang
+          export LD=ld.lld
+          export AR=llvm-ar
+          export NM=llvm-nm
+          export OBJCOPY=llvm-objcopy
+          export OBJDUMP=llvm-objdump
+          export READELF=llvm-readelf
+          export STRIP=llvm-strip
+
+          echo "======================================"
+          echo "BUILDING ZAUKSK"
+          echo "======================================"
+
+          make \
+            -j"$(nproc)" \
+            O=out \
             ARCH=arm64 \
-            LOCALVERSION="-zauksk++" \
-            CC=clang \
-            CLANG_TRIPLE=aarch64-linux-gnu- \
-            CROSS_COMPILE=aarch64-linux-gnu- \
-            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
-            KCFLAGS="-w" \
-            KCPPFLAGS="-w"
+            LLVM=1 \
+            LLVM_IAS=1
 
-      - name: Package with AnyKernel3
+      # ==========================================
+      # CHECK OUTPUT
+      # ==========================================
+      - name: Check kernel output
+        working-directory: kernel
         run: |
-          git clone https://github.com/osm0sis/AnyKernel3.git --depth=1 ak3
+          set -e
 
-          sed -i 's/device.name1=.*/device.name1=gale/g' ak3/anykernel.sh
-          sed -i 's/device.name2=.*/device.name2=gust/g' ak3/anykernel.sh
-          sed -i 's|block=.*|block=/dev/block/by-name/boot|g' ak3/anykernel.sh
-          sed -i 's/is_slot_device=.*/is_slot_device=auto/g' ak3/anykernel.sh
+          echo "======================================"
+          echo "BUILD OUTPUT"
+          echo "======================================"
 
-          IMAGE_FILE=$(find kernel-source/out/arch/arm64/boot/ -type f \( -name "Image.gz-dtb" -o -name "Image.gz" -o -name "Image" \) | head -n 1)
+          find out/arch/arm64/boot \
+            -maxdepth 3 \
+            -type f \
+            | sort
 
-          if [ -z "$IMAGE_FILE" ]; then
-            echo "Kernel Image tidak ditemukan!"
+          echo
+
+          if [ -f out/arch/arm64/boot/Image.gz ]; then
+            echo "SUCCESS: Image.gz found"
+          else
+            echo "ERROR: Image.gz not found"
             exit 1
           fi
 
-          cp "$IMAGE_FILE" ak3/$(basename "$IMAGE_FILE")
-          cd ak3
-          zip -r9 ../Kernel-Redmi13C-zauksk++-MultiSU.zip * -x .git README.md *placeholder
+      # ==========================================
+      # COLLECT
+      # ==========================================
+      - name: Prepare artifacts
+        working-directory: kernel
+        run: |
+          set -e
 
-      - name: Upload Kernel Zip
+          mkdir -p ../zauksk
+
+          cp \
+            out/arch/arm64/boot/Image.gz \
+            ../zauksk/
+
+          if [ -d out/arch/arm64/boot/dts ]; then
+            cp -r \
+              out/arch/arm64/boot/dts \
+              ../zauksk/
+          fi
+
+          cp \
+            out/.config \
+            ../zauksk/
+
+          echo "zauksk" \
+            > ../zauksk/kernel-name.txt
+
+          echo "Mayuri-Chan/android_kernel_xiaomi_gale" \
+            > ../zauksk/source.txt
+
+          echo "lineage-22.2" \
+            > ../zauksk/branch.txt
+
+      # ==========================================
+      # CREATE ZIP
+      # ==========================================
+      - name: Create kernel ZIP
+        run: |
+          cd zauksk
+
+          zip -r \
+            ../zauksk-ReSukiSU-gale.zip \
+            Image.gz \
+            dts \
+            .config \
+            kernel-name.txt \
+            source.txt \
+            branch.txt
+
+      # ==========================================
+      # UPLOAD ARTIFACT
+      # ==========================================
+      - name: Upload kernel
         uses: actions/upload-artifact@v4
         with:
-          name: Kernel-Redmi13C-zauksk++-MultiSU
-          path: Kernel-Redmi13C-zauksk++-MultiSU.zip
-          
+          name: zauksk-ReSukiSU-gale
+          path: |
+            zauksk/
+            zauksk-ReSukiSU-gale.zip
+          if-no-files-found: error
+
+      # ==========================================
+      # SUMMARY
+      # ==========================================
+      - name: Build summary
+        run: |
+          echo "======================================"
+          echo "       BUILD SUCCESS"
+          echo "======================================"
+          echo
+          echo "Device : Redmi 13C / POCO C65"
+          echo "Codename : gale / gust"
+          echo "Kernel : 4.19"
+          echo "Name : zauksk"
+          echo "Root : ReSukiSU"
+          echo "Config : gale_defconfig"
+          echo
+          echo "Download artifact:"
+          echo "zauksk-ReSukiSU-gale"
+          echo "======================================"
