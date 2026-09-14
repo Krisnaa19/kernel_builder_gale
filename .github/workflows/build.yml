@@ -91,6 +91,16 @@ jobs:
           echo "New CONFIG_LOCALVERSION:"
           grep '^CONFIG_LOCALVERSION=' arch/arm64/configs/gale_defconfig
 
+          # Sync Moonbeam-style scheduler config
+          sed -i '/^CONFIG_DEFAULT_MQ_IOSCHED_ADIOS=y$/d' arch/arm64/configs/gale_defconfig
+          sed -i '/^CONFIG_MQ_IOSCHED_ADIOS=y$/d' arch/arm64/configs/gale_defconfig
+          grep -q '^CONFIG_MQ_IOSCHED_SSG=y$' arch/arm64/configs/gale_defconfig || echo 'CONFIG_MQ_IOSCHED_SSG=y' >> arch/arm64/configs/gale_defconfig
+          grep -q '^CONFIG_MQ_IOSCHED_SSG_CGROUP=y$' arch/arm64/configs/gale_defconfig || echo 'CONFIG_MQ_IOSCHED_SSG_CGROUP=y' >> arch/arm64/configs/gale_defconfig
+          grep -q '^CONFIG_NET_SCH_CAKE=y$' arch/arm64/configs/gale_defconfig || echo 'CONFIG_NET_SCH_CAKE=y' >> arch/arm64/configs/gale_defconfig
+
+          echo "Scheduler config:"
+          grep -E 'CONFIG_(MQ_IOSCHED_ADIOS|MQ_IOSCHED_SSG|MQ_IOSCHED_SSG_CGROUP|NET_SCH_CAKE)' arch/arm64/configs/gale_defconfig || true
+
           echo -n "CIP = "
           cat localversion-cip
 
