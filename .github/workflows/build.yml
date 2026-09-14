@@ -218,7 +218,7 @@ jobs:
           echo "KERNEL RELEASE"
           echo "=========================================="
 
-          make O=out ARCH=arm64 kernelrelease
+          make -s --no-print-directory O=out ARCH=arm64 kernelrelease
 
       # ============================================================
       # VERIFY RESUKISU
@@ -250,7 +250,7 @@ jobs:
       # ============================================================
       - name: Verify kernel version string
         run: |
-          VERSION="$(make O=out ARCH=arm64 kernelrelease)"
+          VERSION="$(make -s --no-print-directory O=out ARCH=arm64 kernelrelease | grep -E '^[0-9]' | tr -d '\r\n')"
 
           echo
           echo "=========================================="
@@ -263,7 +263,6 @@ jobs:
           echo "Expected:"
           echo "4.19.325-cip136-st20-zauksk"
 
-          echo
           echo "=========================================="
 
           if [ "$VERSION" != "4.19.325-cip136-st20-zauksk" ]; then
@@ -350,11 +349,11 @@ jobs:
 
           echo
           echo "Kernel release:"
-          make O=out ARCH=arm64 kernelrelease
+          make -s --no-print-directory O=out ARCH=arm64 kernelrelease
 
           echo
           echo "Kernel version:"
-          make O=out ARCH=arm64 kernelversion
+          make -s --no-print-directory O=out ARCH=arm64 kernelversion
 
           echo
           echo "Kernel image:"
@@ -552,7 +551,7 @@ jobs:
 
           echo
           echo "Kernel:"
-          make O=out ARCH=arm64 kernelrelease
+          make -s --no-print-directory O=out ARCH=arm64 kernelrelease
 
           echo
           echo "Expected:"
@@ -562,5 +561,5 @@ jobs:
           echo "ZIP:"
           echo "zauksk-ReSukiSU-CIP136-ST20-gale.zip"
 
-          echo
           echo "=========================================="
+          
