@@ -1,4 +1,4 @@
-name: Build zauksk + ReSukiSU
+name: Build zauksk Kernel
 
 on:
   workflow_dispatch:
@@ -8,13 +8,13 @@ permissions:
 
 jobs:
   build:
-    name: Build zauksk Kernel
+    name: Build zauksk + ReSukiSU
     runs-on: ubuntu-22.04
 
     steps:
 
       # ============================================================
-      # 1. INSTALL DEPENDENCIES
+      # 1. DEPENDENCIES
       # ============================================================
       - name: Install dependencies
         run: |
@@ -26,41 +26,33 @@ jobs:
             git \
             curl \
             wget \
+            unzip \
+            zip \
             bc \
             bison \
             flex \
             ccache \
-            zip \
-            unzip \
             rsync \
-            lz4 \
             cpio \
+            lz4 \
             device-tree-compiler \
             python3 \
-            python3-pip \
             libssl-dev \
             libelf-dev \
             libncurses-dev \
             gcc-aarch64-linux-gnu \
             binutils-aarch64-linux-gnu \
-            clang \
-            llvm \
-            lld
+            build-essential
 
       # ============================================================
       # 2. CLONE MAYURI KERNEL
-      #
-      # IMPORTANT:
-      # Do NOT use lineage-22.2 here.
-      # The current upstream tree exposes the usable kernel tree
-      # through its default/master branch.
       # ============================================================
       - name: Clone Mayuri Kernel
         run: |
           set -eux
 
           echo "=========================================="
-          echo "CLONING MAYURI KERNEL"
+          echo "CLONE MAYURI KERNEL"
           echo "=========================================="
 
           git clone \
@@ -70,21 +62,23 @@ jobs:
 
           cd kernel
 
-          echo "Current branch:"
-          git branch --show-current
-
-          echo "Current commit:"
+          echo "Commit:"
           git log -1 --oneline
 
+          echo "Branch:"
+          git branch --show-current
+
           echo "=========================================="
-          echo "VERIFY KERNEL TREE"
+          echo "VERIFY TREE"
           echo "=========================================="
 
           test -f Makefile
           test -f arch/arm64/configs/gale_defconfig
+          test -f build.config.mtk.aarch64
 
-          echo "OK: Makefile found"
-          echo "OK: gale_defconfig found"
+          echo "OK: Makefile"
+          echo "OK: gale_defconfig"
+          echo "OK: build.config.mtk.aarch64"
 
           echo "Kernel version:"
           make kernelversion
@@ -105,37 +99,50 @@ jobs:
             "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" \
             | bash
 
+          test -d KernelSU
+
+          echo "ReSukiSU / KernelSU directory found."
+
       # ============================================================
-      # 4. VERIFY RESUKISU
+      # 4. DOWNLOAD EXACT CLANG R383902
       # ============================================================
-      - name: Verify ReSukiSU
-        working-directory: kernel
+      - name: Install Android Clang r383902
         run: |
           set -eux
 
           echo "=========================================="
-          echo "VERIFY RESUKISU"
+          echo "INSTALL CLANG R383902"
           echo "=========================================="
 
-          if [ ! -d KernelSU ]; then
-            echo "ERROR: KernelSU directory not found"
-            exit 1
-          fi
+          mkdir -p "$HOME/toolchains"
 
-          echo "KernelSU directory:"
-          ls -la KernelSU
+          git clone \
+            --depth=1 \
+            --filter=blob:none \
+            --sparse \
+            https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 \
+            "$HOME/toolchains/clang"
 
-          echo "Searching ReSukiSU/KSU configuration..."
+          cd "$HOME/toolchains/clang"
 
-          grep -R "config KSU" -n \
-            KernelSU \
-            2>/dev/null | head -20 || true
+          git sparse-checkout set clang-r383902
+
+          test -x clang-r383902/bin/clang
+          test -x clang-r383902/bin/ld.lld
+
+          echo "Clang:"
+          clang-r383902/bin/clang --version
+
+          echo "LLD:"
+          clang-r383902/bin/ld.lld --version
 
       # ============================================================
-      # 5. PREPARE CONFIG
+      # 5. PREPARE KERNEL CONFIG
       # ============================================================
       - name: Prepare kernel configuration
         working-directory: kernel
+        env:
+          CLANG_PATH: ${{ env.HOME }}/toolchains/clang/clang-r383902
         run: |
           set -eux
 
@@ -143,15 +150,38 @@ jobs:
           echo "PREPARE KERNEL CONFIG"
           echo "=========================================="
 
-          test -f arch/arm64/configs/gale_defconfig
+          export PATH="$HOME/toolchains/clang/clang-r383902/bin:$PATH"
 
-          make O=out ARCH=arm64 gale_defconfig
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-gnu-
 
-          echo "Initial config created."
+          export LLVM=1
+          export LLVM_IAS=1
+
+          rm -rf out
+          mkdir -p out
+
+          echo "=========================================="
+          echo "STEP 1: gale_defconfig"
+          echo "=========================================="
+
+          make \
+            O=out \
+            ARCH=arm64 \
+            CROSS_COMPILE="$CROSS_COMPILE" \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            gale_defconfig
+
+          test -f out/.config
+
+          echo "gale_defconfig generated."
 
           # --------------------------------------------------------
           # Kernel name
           # --------------------------------------------------------
+
           scripts/config \
             --file out/.config \
             --set-str LOCALVERSION "-zauksk"
@@ -159,6 +189,7 @@ jobs:
           # --------------------------------------------------------
           # ReSukiSU
           # --------------------------------------------------------
+
           scripts/config \
             --file out/.config \
             --enable CONFIG_KSU
@@ -166,35 +197,82 @@ jobs:
           # --------------------------------------------------------
           # Manual Hook
           # --------------------------------------------------------
-          if grep -Rqs "config KSU_MANUAL_HOOK" KernelSU; then
+
+          if grep -Rqs \
+            "config KSU_MANUAL_HOOK" \
+            KernelSU; then
+
+            echo "CONFIG_KSU_MANUAL_HOOK found."
+
             scripts/config \
               --file out/.config \
               --enable CONFIG_KSU_MANUAL_HOOK
+
           else
-            echo "WARNING: CONFIG_KSU_MANUAL_HOOK not found."
-            echo "Checking Kconfig files..."
-
-            grep -R \
-              "KSU_MANUAL_HOOK" \
-              KernelSU \
-              2>/dev/null || true
-
+            echo "ERROR:"
+            echo "CONFIG_KSU_MANUAL_HOOK was not found in KernelSU."
             exit 1
           fi
 
-          # Re-resolve dependencies
-          make O=out ARCH=arm64 olddefconfig
-
           echo "=========================================="
-          echo "FINAL CONFIG CHECK"
+          echo "CONFIG BEFORE OLDDEFCONFIG"
           echo "=========================================="
 
           grep -E \
             'CONFIG_LOCALVERSION=|CONFIG_KSU=|CONFIG_KSU_MANUAL_HOOK=' \
-            out/.config
+            out/.config || true
+
+          # --------------------------------------------------------
+          # VERY IMPORTANT
+          #
+          # olddefconfig must be used so Kconfig NEVER asks
+          # interactive questions.
+          # --------------------------------------------------------
 
           echo "=========================================="
-          echo "CONFIG CHECK PASSED"
+          echo "RUN OLDDEFCONFIG"
+          echo "=========================================="
+
+          make \
+            O=out \
+            ARCH=arm64 \
+            CROSS_COMPILE="$CROSS_COMPILE" \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            olddefconfig
+
+          # --------------------------------------------------------
+          # Verify generated auto.conf
+          # --------------------------------------------------------
+
+          test -f out/include/config/auto.conf
+
+          echo "auto.conf generated successfully."
+
+          # --------------------------------------------------------
+          # Prepare generated headers
+          # --------------------------------------------------------
+
+          make \
+            O=out \
+            ARCH=arm64 \
+            CROSS_COMPILE="$CROSS_COMPILE" \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            prepare
+
+          test -f out/include/generated/autoconf.h || true
+
+          echo "=========================================="
+          echo "FINAL CONFIG"
+          echo "=========================================="
+
+          grep -E \
+            'CONFIG_LOCALVERSION=|CONFIG_KSU=|CONFIG_KSU_MANUAL_HOOK=|CONFIG_MACH_MT6768=|CONFIG_NR_CPUS=' \
+            out/.config || true
+
+          echo "=========================================="
+          echo "CONFIGURATION READY"
           echo "=========================================="
 
       # ============================================================
@@ -208,6 +286,8 @@ jobs:
           echo "=========================================="
           echo "BUILD KERNEL"
           echo "=========================================="
+
+          export PATH="$HOME/toolchains/clang/clang-r383902/bin:$PATH"
 
           export ARCH=arm64
           export SUBARCH=arm64
@@ -227,8 +307,26 @@ jobs:
           export OBJSIZE=llvm-size
           export STRIP=llvm-strip
 
+          # --------------------------------------------------------
+          # IMPORTANT:
+          #
+          # Prevent Kbuild from silently entering interactive
+          # configuration.
+          # --------------------------------------------------------
+
+          export KCONFIG_NOSILENTUPDATE=1
+
+          test -f out/.config
+          test -f out/include/config/auto.conf
+
+          echo "Using compiler:"
+          clang --version
+
+          echo "=========================================="
+          echo "START COMPILE"
+          echo "=========================================="
+
           make \
-            -j"$(nproc)" \
             O=out \
             ARCH=arm64 \
             CROSS_COMPILE="$CROSS_COMPILE" \
@@ -242,14 +340,16 @@ jobs:
             OBJDUMP=llvm-objdump \
             READELF=llvm-readelf \
             OBJSIZE=llvm-size \
-            STRIP=llvm-strip
+            STRIP=llvm-strip \
+            KCONFIG_NOSILENTUPDATE=1 \
+            -j"$(nproc)"
 
           echo "=========================================="
-          echo "BUILD FINISHED"
+          echo "COMPILE FINISHED"
           echo "=========================================="
 
       # ============================================================
-      # 7. VERIFY KERNEL IMAGE
+      # 7. CHECK IMAGE
       # ============================================================
       - name: Check kernel
         working-directory: kernel
@@ -257,20 +357,26 @@ jobs:
           set -eux
 
           echo "=========================================="
-          echo "CHECK KERNEL IMAGE"
+          echo "CHECK KERNEL"
           echo "=========================================="
 
           if [ -f out/arch/arm64/boot/Image.gz ]; then
-            echo "Found Image.gz"
+            echo "FOUND: Image.gz"
             ls -lh out/arch/arm64/boot/Image.gz
 
           elif [ -f out/arch/arm64/boot/Image ]; then
-            echo "Found Image"
+            echo "FOUND: Image"
             ls -lh out/arch/arm64/boot/Image
 
           else
-            echo "ERROR: Kernel Image not found"
-            find out/arch/arm64/boot -maxdepth 2 -type f -print
+            echo "ERROR: Image not found."
+
+            echo "Available boot files:"
+            find out/arch/arm64/boot \
+              -maxdepth 2 \
+              -type f \
+              -print
+
             exit 1
           fi
 
@@ -286,32 +392,34 @@ jobs:
             https://github.com/osm0sis/AnyKernel3.git \
             AnyKernel3
 
-          echo "AnyKernel3 ready."
+          test -f AnyKernel3/tools/ak3-core.sh
 
       # ============================================================
-      # 9. COPY KERNEL IMAGE
+      # 9. COPY IMAGE
       # ============================================================
       - name: Copy kernel image
         run: |
           set -eux
 
-          rm -f AnyKernel3/zImage
           rm -f AnyKernel3/Image
-          rm -f AnyKernel3/Image-dtb
           rm -f AnyKernel3/Image.gz
+          rm -f AnyKernel3/Image-dtb
+          rm -f AnyKernel3/zImage
 
           if [ -f kernel/out/arch/arm64/boot/Image.gz ]; then
+
             cp \
               kernel/out/arch/arm64/boot/Image.gz \
               AnyKernel3/Image.gz
 
           elif [ -f kernel/out/arch/arm64/boot/Image ]; then
+
             cp \
               kernel/out/arch/arm64/boot/Image \
               AnyKernel3/Image
 
           else
-            echo "ERROR: No kernel image available"
+            echo "ERROR: no kernel image."
             exit 1
           fi
 
@@ -327,7 +435,7 @@ jobs:
           cd AnyKernel3
 
           cat > anykernel.sh <<'EOF'
-          ### AnyKernel3 Ramdisk Mod Script
+          ### AnyKernel3
           ### zauksk + ReSukiSU
           ### Redmi 13C / POCO C65
           ### gale / gust
@@ -348,30 +456,14 @@ jobs:
           supported.vendorpatchlevels=
           '; }
 
-          # --------------------------------------------------------
-          # Boot partition
-          # --------------------------------------------------------
-
           block=auto;
           is_slot_device=auto;
           ramdisk_compression=auto;
           patch_vbmeta_flag=auto;
 
-          # --------------------------------------------------------
-          # AnyKernel core
-          # --------------------------------------------------------
-
           . tools/ak3-core.sh;
 
-          # --------------------------------------------------------
-          # Dump current boot
-          # --------------------------------------------------------
-
           dump_boot;
-
-          # --------------------------------------------------------
-          # Replace kernel
-          # --------------------------------------------------------
 
           write_boot;
           EOF
@@ -379,43 +471,46 @@ jobs:
           chmod +x anykernel.sh
 
           echo "=========================================="
-          echo "ANYKERNEL CONFIG"
+          echo "ANYKERNEL SCRIPT"
           echo "=========================================="
 
           cat anykernel.sh
 
       # ============================================================
-      # 11. ADD BUILD INFORMATION
+      # 11. BUILD INFO
       # ============================================================
-      - name: Add kernel information
+      - name: Add build information
         run: |
           set -eux
 
           cd AnyKernel3
 
-          echo "zauksk Kernel" > version
-          echo "ReSukiSU" >> version
-          echo "Manual Hook" >> version
-          echo "Redmi 13C / POCO C65" >> version
-          echo "gale / gust" >> version
-          echo "Linux 4.19" >> version
+          cat > version <<'EOF'
+          zauksk Kernel
+          ReSukiSU
+          Manual Hook
+          Redmi 13C / POCO C65
+          gale / gust
+          Linux 4.19
+          EOF
 
-          cat > build-info.txt <<EOF
+          cat > build-info.txt <<'EOF'
           Kernel: zauksk
           Root: ReSukiSU
           Hook: Manual Hook
           Device: Redmi 13C / POCO C65
           Codename: gale / gust
-          Kernel: Linux 4.19
-          Source: Mayuri-Chan/android_kernel_xiaomi_gale
+          Linux: 4.19
           Defconfig: gale_defconfig
           Architecture: arm64
+          Compiler: Android Clang r383902
+          Source: Mayuri-Chan/android_kernel_xiaomi_gale
           EOF
 
           cat build-info.txt
 
       # ============================================================
-      # 12. CREATE FLASHABLE ZIP
+      # 12. CREATE ZIP
       # ============================================================
       - name: Create flashable ZIP
         run: |
@@ -429,37 +524,34 @@ jobs:
             ../release/zauksk-ReSukiSU-gale.zip \
             . \
             -x ".git/*" \
-            -x ".gitignore" \
             -x ".github/*"
 
           cd ..
 
+          test -f release/zauksk-ReSukiSU-gale.zip
+
           echo "=========================================="
-          echo "FLASHABLE ZIP CREATED"
+          echo "FLASHABLE ZIP"
           echo "=========================================="
 
           ls -lh release/zauksk-ReSukiSU-gale.zip
 
       # ============================================================
-      # 13. CHECK ZIP
+      # 13. VERIFY ZIP
       # ============================================================
-      - name: Verify flashable ZIP
+      - name: Verify ZIP
         run: |
           set -eux
-
-          test -f release/zauksk-ReSukiSU-gale.zip
 
           unzip -t \
             release/zauksk-ReSukiSU-gale.zip
 
-          echo "=========================================="
-          echo "ZIP CHECK PASSED"
-          echo "=========================================="
+          echo "ZIP TEST PASSED."
 
       # ============================================================
       # 14. SHA256
       # ============================================================
-      - name: Generate checksum
+      - name: Generate SHA256
         run: |
           set -eux
 
@@ -472,7 +564,7 @@ jobs:
           cat SHA256SUMS.txt
 
       # ============================================================
-      # 15. UPLOAD ONLY ZIP
+      # 15. UPLOAD ONLY FLASHABLE ZIP
       # ============================================================
       - name: Upload flashable ZIP
         uses: actions/upload-artifact@v4
