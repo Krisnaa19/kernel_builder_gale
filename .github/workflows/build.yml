@@ -249,11 +249,14 @@ jobs:
       - name: Configure AnyKernel3
         run: |
           cat > anykernel/anykernel.sh <<'EOF'
+          ### AnyKernel3 Ramdisk Mod Script
+          ## osm0sis @ xda-developers
+
           properties() { '
-          kernel.string=#ice bear++ Kernel - ReSukiSU - NoMount
+          kernel.string=#ice bear++-gale-kernel
           do.devicecheck=1
           do.modules=0
-          do.systemless=0
+          do.systemless=1
           do.cleanup=1
           do.cleanuponabort=0
           device.name1=gale
@@ -263,15 +266,34 @@ jobs:
           supported.vendorpatchlevels=
           '; }
 
-          block=auto;
-          is_slot_device=auto;
-          ramdisk_compression=auto;
-          patch_vbmeta_flag=auto;
+          boot_attributes() {
+          set_perm_recursive 0 0 755 644 $RAMDISK/*;
+          set_perm_recursive 0 0 750 750 $RAMDISK/init* $RAMDISK/sbin;
+          }
+
+          BLOCK=/dev/block/by-name/boot;
+          IS_SLOT_DEVICE=1;
+          RAMDISK_COMPRESSION=auto;
+          PATCH_VBMETA_FLAG=auto;
 
           . tools/ak3-core.sh;
 
           dump_boot;
-          write_boot;
+
+          backup_file init.rc;
+          replace_string init.rc "cpuctl cpu,timer_slack" "mount cgroup none /dev/cpuctl cpu" "mount cgroup none /dev/cpuctl cpu,timer_slack";
+
+          backup_file init.tuna.rc;
+          insert_line init.tuna.rc "nodiratime barrier=0" after "mount_all /fstab.tuna" "\tmount ext4 /dev/block/by-name/userdata /data remount nosuid nodev noatime nodiratime barrier=0";
+          append_file init.tuna.rc "bootscript" init.tuna;
+
+          backup_file fstab.tuna;
+          patch_fstab fstab.tuna /system ext4 options "noatime,barrier=1" "noatime,nodiratime,barrier=0";
+          patch_fstab fstab.tuna /cache ext4 options "barrier=1" "barrier=0,nomblk_io_submit";
+          patch_fstab fstab.tuna /data ext4 options "data=ordered" "nomblk_io_submit,data=writeback";
+          append_file fstab.tuna "usbdisk" fstab;
+
+          flash_boot;
           EOF
 
       - name: Copy kernel to AnyKernel3
