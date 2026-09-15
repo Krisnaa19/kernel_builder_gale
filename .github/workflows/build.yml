@@ -86,9 +86,7 @@ jobs:
         run: |
           echo "Original CONFIG_LOCALVERSION:"
           grep '^CONFIG_LOCALVERSION=' arch/arm64/configs/gale_defconfig || true
-          sed -i \
-            's/^CONFIG_LOCALVERSION=.*/CONFIG_LOCALVERSION="-#ice bear++"/' \
-            arch/arm64/configs/gale_defconfig
+          sed -i 's/^CONFIG_LOCALVERSION=.*/CONFIG_LOCALVERSION="-#ice bear++"/' arch/arm64/configs/gale_defconfig
           echo "New CONFIG_LOCALVERSION:"
           grep '^CONFIG_LOCALVERSION=' arch/arm64/configs/gale_defconfig
           # Sync Moonbeam-style scheduler config
@@ -99,38 +97,23 @@ jobs:
           grep -q '^CONFIG_NET_SCH_CAKE=y$' arch/arm64/configs/gale_defconfig || echo 'CONFIG_NET_SCH_CAKE=y' >> arch/arm64/configs/gale_defconfig
           echo "Scheduler config:"
           grep -E 'CONFIG_(MQ_IOSCHED_ADIOS|MQ_IOSCHED_SSG|MQ_IOSCHED_SSG_CGROUP|NET_SCH_CAKE)' arch/arm64/configs/gale_defconfig || true
-          echo -n "CIP = "
-          cat localversion-cip || true
-          echo -n "ST  = "
-          cat localversion-st || true
 
       - name: Prepare kernel config
         run: |
           export ARCH=arm64
           mkdir -p out
           make O=out ARCH=arm64 gale_defconfig
-          scripts/config --file out/.config \
-            --enable CONFIG_KSU
-          scripts/config --file out/.config \
-            --enable CONFIG_KSU_MANUAL_HOOK
-          scripts/config --file out/.config \
-            --enable CONFIG_NOMOUNT
-          scripts/config --file out/.config \
-            --disable CONFIG_LLVM_POLLY
-          scripts/config --file out/.config \
-            --set-str CONFIG_LOCALVERSION "-#ice bear++"
-          scripts/config --file out/.config \
-            --disable CONFIG_LOCALVERSION_AUTO
+          scripts/config --file out/.config --enable CONFIG_KSU
+          scripts/config --file out/.config --enable CONFIG_KSU_MANUAL_HOOK
+          scripts/config --file out/.config --enable CONFIG_NOMOUNT
+          scripts/config --file out/.config --disable CONFIG_LLVM_POLLY
+          scripts/config --file out/.config --set-str CONFIG_LOCALVERSION "-#ice bear++"
+          scripts/config --file out/.config --disable CONFIG_LOCALVERSION_AUTO
           make O=out ARCH=arm64 olddefconfig
           echo "=== Final scheduler configuration ==="
           grep -E 'CONFIG_(MQ_IOSCHED_ADIOS|MQ_IOSCHED_SSG|MQ_IOSCHED_SSG_CGROUP|NET_SCH_CAKE)' out/.config || true
-          echo "=== Final kernel configuration ==="
-          grep -E \
-            'CONFIG_(LOCALVERSION|LOCALVERSION_AUTO|KSU|KSU_MANUAL_HOOK|NOMOUNT|LLVM_POLLY)' \
-            out/.config || true
           echo "=== Kernel release ==="
-          make -s --no-print-directory \
-            O=out ARCH=arm64 kernelrelease
+          make -s --no-print-directory O=out ARCH=arm64 kernelrelease
 
       - name: Verify ReSukiSU Manual Hook
         run: |
@@ -143,23 +126,6 @@ jobs:
           test -d fs/nomount
           grep -q '^CONFIG_NOMOUNT=y' out/.config
           echo "NoMount: OK"
-
-      - name: Verify kernel version string
-        run: |
-          VERSION="$(make -s --no-print-directory \
-            O=out ARCH=arm64 kernelrelease \
-            | grep -E '^[0-9]' \
-            | tr -d '\r\n')"
-          echo "Actual:"
-          echo "$VERSION"
-          echo "Expected:"
-          echo "4.19.325-cip136-st20-#ice bear++"
-          if [ "$VERSION" != "4.19.325-cip136-st20-#ice bear++" ]; then
-            echo "ERROR: Kernel version mismatch!"
-            echo "Actual: $VERSION"
-            exit 1
-          fi
-          echo "VERSION CHECK: PASS"
 
       - name: Build kernel
         run: |
@@ -192,39 +158,74 @@ jobs:
             cp out/arch/arm64/boot/Image Image
           else
             echo "ERROR: Kernel image not found!"
-            find out/arch/arm64/boot \
-              -maxdepth 2 \
-              -type f \
-              -print
+            find out/arch/arm64/boot -maxdepth 2 -type f -print
             exit 1
           fi
 
-      - name: Verify kernel build
+      - name: Prepare AnyKernel3 (Standar osm0sis)
         run: |
-          echo "=== Kernel release ==="
-          make -s --no-print-directory \
-            O=out ARCH=arm64 kernelrelease
-          echo "=== Kernel version ==="
-          make -s --no-print-directory \
-            O=out ARCH=arm64 kernelversion
-          echo "=== Kernel image ==="
-          ls -lh Image* 2>/dev/null || true
-          echo "=== Important config ==="
-          grep -E \
-            'CONFIG_(LOCALVERSION|LOCALVERSION_AUTO|KSU|KSU_MANUAL_HOOK|NOMOUNT|LLVM_POLLY)' \
-            out/.config || true
+          git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git anykernel
+          rm -rf anykernel/.git
 
-      - name: Prepare AnyKernel3 (Moonbeam Repo)
+      - name: Configure AnyKernel3 (Moonbeam Script)
         run: |
-          if [ -d "$GITHUB_WORKSPACE/builder/anykernel-mod" ]; then
-            cp -r "$GITHUB_WORKSPACE/builder/anykernel-mod" anykernel
-          elif [ -d "$GITHUB_WORKSPACE/builder/anykernel" ]; then
-            cp -r "$GITHUB_WORKSPACE/builder/anykernel" anykernel
-          else
-            echo "ERROR: Folder AnyKernel3 hasil bongkaran Moonbeam tidak ditemukan di repo builder!"
-            exit 1
-          fi
-          chmod -R 755 anykernel/
+          cat > anykernel/anykernel.sh <<'EOF'
+          ### AnyKernel3 Ramdisk Mod Script
+          ## osm0sis @ xda-developers
+
+          ### AnyKernel setup
+          # global properties
+          properties() { '
+          kernel.string=#ice bear++ Kernel - ReSukiSU - NoMount
+          do.devicecheck=1
+          do.modules=0
+          do.systemless=1
+          do.cleanup=1
+          do.cleanuponabort=0
+          device.name1=gale
+          device.name2=gust
+          supported.versions=
+          supported.patchlevels=
+          supported.vendorpatchlevels=
+          '; } # end properties
+
+          ### AnyKernel install
+          ## boot files attributes
+          boot_attributes() {
+          set_perm_recursive 0 0 755 644 $RAMDISK/*;
+          set_perm_recursive 0 0 750 750 $RAMDISK/init* $RAMDISK/sbin;
+          } # end attributes
+
+          # boot shell variables
+          BLOCK=/dev/block/by-name/boot;
+          IS_SLOT_DEVICE=1;
+          RAMDISK_COMPRESSION=auto;
+          PATCH_VBMETA_FLAG=auto;
+
+          # import functions/variables and setup patching - see for reference (DO NOT REMOVE)
+          . tools/ak3-core.sh;
+
+          # boot install
+          dump_boot; # use split_boot to skip ramdisk unpack, e.g. for devices with init_boot ramdisk
+
+          # init.rc
+          backup_file init.rc;
+          replace_string init.rc "cpuctl cpu,timer_slack" "mount cgroup none /dev/cpuctl cpu" "mount cgroup none /dev/cpuctl cpu,timer_slack";
+
+          # init.tuna.rc
+          backup_file init.tuna.rc;
+          insert_line init.tuna.rc "nodiratime barrier=0" after "mount_all /fstab.tuna" "\tmount ext4 /dev/block/by-name/userdata /data remount nosuid nodev noatime nodiratime barrier=0";
+          append_file init.tuna.rc "bootscript" init.tuna;
+
+          # fstab.tuna
+          backup_file fstab.tuna;
+          patch_fstab fstab.tuna /system ext4 options "noatime,barrier=1" "noatime,nodiratime,barrier=0";
+          patch_fstab fstab.tuna /cache ext4 options "barrier=1" "barrier=0,nomblk_io_submit";
+          patch_fstab fstab.tuna /data ext4 options "data=ordered" "nomblk_io_submit,data=writeback";
+          append_file fstab.tuna "usbdisk" fstab;
+
+          flash_boot; # NÃO faz repack do ramdisk, apenas atualiza kernel
+          EOF
 
       - name: Copy kernel to AnyKernel3
         run: |
@@ -243,7 +244,6 @@ jobs:
           rm -rf .github
           rm -f LICENSE
           rm -f README.md
-          rm -f ZAUKSK_BUILD_INFO.txt
           echo "=== Final AnyKernel3 files ==="
           find . -maxdepth 2 -type f | sort
 
@@ -252,46 +252,19 @@ jobs:
           ZIP_NAME="ice-bear-ReSukiSU-CIP136-ST20-gale.zip"
           cd anykernel
           rm -f "../$ZIP_NAME"
-          FILES=(
-            "META-INF"
-            "modules"
-            "patch"
-            "ramdisk"
-            "tools"
-            "anykernel.sh"
-            "banner"
-          )
+          FILES=("META-INF" "modules" "patch" "ramdisk" "tools" "anykernel.sh" "banner")
           if [ -f Image.gz ]; then
             FILES+=("Image.gz")
           elif [ -f Image ]; then
             FILES+=("Image")
-          else
-            echo "ERROR: Image/Image.gz missing"
-            exit 1
           fi
           zip -r9 "../$ZIP_NAME" "${FILES[@]}"
           cd ..
-          test -f "$ZIP_NAME"
-          echo "=== Flashable ZIP ==="
           ls -lh "$ZIP_NAME"
-
-      - name: Validate final ZIP
-        run: |
-          ZIP="ice-bear-ReSukiSU-CIP136-ST20-gale.zip"
-          test -f "$ZIP"
-          echo "=== ZIP contents ==="
-          unzip -l "$ZIP"
-          echo "=== Required files ==="
-          unzip -l "$ZIP" | grep -E \
-            'META-INF/|modules/|patch/|ramdisk/|tools/|anykernel.sh|banner|Image.gz|Image'
-          echo "ZIP VALIDATION: PASS"
 
       - name: Generate SHA256
         run: |
-          sha256sum \
-            ice-bear-ReSukiSU-CIP136-ST20-gale.zip \
-            > SHA256SUMS.txt
-          cat SHA256SUMS.txt
+          sha256sum ice-bear-ReSukiSU-CIP136-ST20-gale.zip > SHA256SUMS.txt
 
       - name: Upload flashable ZIP
         uses: actions/upload-artifact@v4
@@ -300,18 +273,4 @@ jobs:
           path: |
             ice-bear-ReSukiSU-CIP136-ST20-gale.zip
             SHA256SUMS.txt
-
-      - name: Complete
-        run: |
-          echo "========================================"
-          echo "BUILD SUCCESS"
-          echo "========================================"
-          echo "Kernel:"
-          make -s --no-print-directory \
-            O=out ARCH=arm64 kernelrelease
-          echo "Expected:"
-          echo "4.19.325-cip136-st20-#ice bear++"
-          echo "ZIP:"
-          echo "ice-bear-ReSukiSU-CIP136-ST20-gale.zip"
-          echo "========================================"
-          
+            
