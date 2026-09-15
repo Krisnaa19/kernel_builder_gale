@@ -1,4 +1,4 @@
-name: Build #ice bear++ Kernel - MB56
+name: Build #ice bear++ Kernel - Ice Bear
 
 on:
   workflow_dispatch:
@@ -30,16 +30,16 @@ jobs:
           fetch-depth: 1
 
       # ============================================================
-      # INSTALL MB56 DEFCONFIG
+      # INSTALL Ice Bear DEFCONFIG
       # ============================================================
-      - name: Install MB56 defconfig
+      - name: Install Ice Bear defconfig
         run: |
           set -e
-          test -f builder/configs/mb56_defconfig
-          cp builder/configs/mb56_defconfig \
-            arch/arm64/configs/mb56_defconfig
+          test -f builder/configs/icebear_defconfig
+          cp builder/configs/icebear_defconfig \
+            arch/arm64/configs/icebear_defconfig
           grep '^CONFIG_LOCALVERSION=' \
-            arch/arm64/configs/mb56_defconfig
+            arch/arm64/configs/icebear_defconfig
 
       # ============================================================
       # INSTALL DEPENDENCIES
@@ -130,7 +130,7 @@ jobs:
       # ============================================================
       # PREPARE KERNEL CONFIG
       # ============================================================
-      - name: Prepare MB56 kernel config
+      - name: Prepare Ice Bear kernel config
         run: |
           set -e
 
@@ -151,16 +151,16 @@ jobs:
 
           mkdir -p out
 
-          make O=out ARCH=arm64 mb56_defconfig
+          make O=out ARCH=arm64 icebear_defconfig
           make O=out ARCH=arm64 olddefconfig
 
           echo "Kernel release:"
           make O=out ARCH=arm64 kernelrelease
 
       # ============================================================
-      # VERIFY MB56 CONFIG
+      # VERIFY Ice Bear CONFIG
       # ============================================================
-      - name: Verify MB56 config
+      - name: Verify Ice Bear config
         run: |
           set -e
 
@@ -173,9 +173,9 @@ jobs:
           grep -q '^CONFIG_THINLTO=y' out/.config
           grep -q '^CONFIG_LLVM_POLLY=y' out/.config
           grep -q '^CONFIG_LOCALVERSION="-#ice bear++"' \
-            arch/arm64/configs/mb56_defconfig
+            arch/arm64/configs/icebear_defconfig
 
-          echo "MB56 + ReSukiSU Manual Hook + NoMount + ThinLTO verified."
+          echo "Ice Bear + ReSukiSU Manual Hook + NoMount + ThinLTO verified."
 
       # ============================================================
       # BUILD KERNEL
