@@ -355,7 +355,7 @@ jobs:
           cd AnyKernel3
 
           zip -r9 \
-            ../#ice-bear++-MB56-gale.zip \
+            ../ice-bear-MB56-gale.zip \
             . \
             -x '*.git*' \
             -x 'README.md' \
@@ -363,8 +363,8 @@ jobs:
 
           cd ..
 
-          test -f "#ice-bear++-MB56-gale.zip"
-          ls -lh "#ice-bear++-MB56-gale.zip"
+          test -f "ice-bear-MB56-gale.zip"
+          ls -lh "ice-bear-MB56-gale.zip"
 
       # ============================================================
       # VERIFY ZIP
@@ -373,7 +373,7 @@ jobs:
         run: |
           set -e
 
-          unzip -t "#ice-bear++-MB56-gale.zip"
+          unzip -t "ice-bear-MB56-gale.zip"
 
       # ============================================================
       # UPLOAD FLASHABLE ZIP
@@ -382,6 +382,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ice-bear-MB56-gale-FLASHABLE
-          path: "#ice-bear++-MB56-gale.zip"
+          path: "ice-bear-MB56-gale.zip"
           if-no-files-found: error
           
