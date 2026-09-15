@@ -39,6 +39,14 @@ jobs:
         run: |
           sudo apt-get install -y gcc-aarch64-linux-gnu
 
+      - name: Cache LLVM 24
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ github.workspace }}/prebuilts/clang/host/linux-x86/llvm24
+            ${{ github.workspace }}/llvm-project/build
+          key: llvm24-598f15297528855682dcf381575a9c14a7faabc3-${{ runner.os }}
+
       - name: Build LLVM 24
         run: |
           git clone https://github.com/llvm/llvm-project.git llvm-project
