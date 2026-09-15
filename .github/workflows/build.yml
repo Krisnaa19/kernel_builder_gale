@@ -8,10 +8,6 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-
-      # ============================================================
-      # CHECKOUT KERNEL SOURCE
-      # ============================================================
       - name: Checkout kernel source
         uses: actions/checkout@v4
         with:
@@ -19,87 +15,51 @@ jobs:
           ref: dev
           fetch-depth: 1
 
-      # ============================================================
-      # CHECKOUT BUILDER FILES
-      # ============================================================
       - name: Checkout builder files
         uses: actions/checkout@v4
         with:
           path: builder
 
-      # ============================================================
-      # INSTALL MB56 DEFCONFIG
-      # ============================================================
       - name: Install MB56 defconfig
         run: |
           cp builder/configs/mb56_defconfig \
             arch/arm64/configs/mb56_defconfig
-
-          echo "MB56 defconfig installed:"
           grep '^CONFIG_LOCALVERSION=' \
             arch/arm64/configs/mb56_defconfig
 
-      # ============================================================
-      # INSTALL DEPENDENCIES
-      # ============================================================
       - name: Install dependencies
         run: |
           sudo apt-get update
-
           sudo apt-get install -y \
-            bc \
-            bison \
-            flex \
-            build-essential \
-            clang \
-            lld \
-            llvm \
-            gcc-aarch64-linux-gnu \
-            binutils-aarch64-linux-gnu \
-            libssl-dev \
-            libelf-dev \
-            libncurses5-dev \
-            libncurses-dev \
-            python3 \
-            cmake \
-            ninja-build \
-            python3-pip \
-            zip \
-            unzip \
-            cpio \
-            rsync \
-            git \
-            curl \
-            wget \
-            pahole
+            bc bison flex build-essential clang lld llvm \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            libssl-dev libelf-dev libncurses5-dev libncurses-dev \
+            python3 cmake ninja-build python3-pip \
+            zip unzip cpio rsync git curl wget pahole
 
-      # ============================================================
-      # VERIFY AARCH64 GCC
-      # ============================================================
       - name: Verify AArch64 GCC
         run: |
           aarch64-linux-gnu-gcc --version
 
-      # ============================================================
-      # CACHE LLVM 24
-      # ============================================================
       - name: Cache LLVM 24
         id: llvm-cache
         uses: actions/cache@v4
         with:
-          path: |
-            ${{ github.workspace }}/prebuilts/clang/host/linux-x86/llvm24
+          path: ${{ github.workspace }}/prebuilts/clang/host/linux-x86/llvm24
           key: llvm24-598f15297528855682dcf381575a9c14a7faabc3-${{ runner.os }}
 
-      # ============================================================
-      # BUILD LLVM 24 ONLY WHEN CACHE MISS
-      # ============================================================
       - name: Build LLVM 24
         if: steps.llvm-cache.outputs.cache-hit != 'true'
         run: |
-          git clone https://github.com/llvm/llvm-project.git llvm-project
+          set -e
+
+          git clone --filter=blob:none --no-checkout \
+            https://github.com/llvm/llvm-project.git llvm-project
 
           cd llvm-project
+
+          git fetch --depth=1 origin \
+            598f15297528855682dcf381575a9c14a7faabc3
 
           git checkout 598f15297528855682dcf381575a9c14a7faabc3
 
@@ -126,12 +86,11 @@ jobs:
               "$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/llvm24/lib/"
           fi
 
-      # ============================================================
-      # VERIFY LLVM 24
-      # ============================================================
       - name: Verify LLVM 24
         run: |
-          export LLVM_PATH="$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/llvm24/bin"
+          set -e
+
+          LLVM_PATH="$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/llvm24/bin"
 
           test -x "$LLVM_PATH/clang"
           test -x "$LLVM_PATH/ld.lld"
@@ -145,139 +104,73 @@ jobs:
           "$LLVM_PATH/clang" --version
           "$LLVM_PATH/ld.lld" --version
 
-      # ============================================================
-      # VERIFY KERNEL BASE VERSION
-      # ============================================================
-      - name: Verify kernel base version
-        run: |
-          echo "Kernel version:"
-          grep -E '^(VERSION|PATCHLEVEL|SUBLEVEL|EXTRAVERSION)' Makefile
-
-          echo "CIP:"
-          cat localversion-cip
-
-          echo "ST:"
-          cat localversion-st
-
-      # ============================================================
-      # SETUP RESUKISU
-      # ============================================================
       - name: Setup ReSukiSU
         run: |
           curl -LSs \
             "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" \
             | bash
 
-      # ============================================================
-      # SETUP NOMOUNT
-      # ============================================================
       - name: Setup NoMount
         run: |
           curl -LSs \
             "https://raw.githubusercontent.com/maxsteeel/nomount/v2.0.0/kernel/setup.sh" \
             | bash -s v2.0.0
 
-      # ============================================================
-      # VERIFY MB56 CONFIG
-      # ============================================================
       - name: Verify MB56 config
         run: |
-          echo "Using MB56 config with #ice bear++ branding"
+          set -e
 
           grep '^CONFIG_LOCALVERSION=' \
             arch/arm64/configs/mb56_defconfig
 
-          echo -n "CIP = "
-          cat localversion-cip
+          grep '^CONFIG_KSU=y' \
+            arch/arm64/configs/mb56_defconfig
 
-          echo -n "ST  = "
-          cat localversion-st
+          grep '^CONFIG_KSU_MANUAL_HOOK=y' \
+            arch/arm64/configs/mb56_defconfig
 
-      # ============================================================
-      # PREPARE KERNEL CONFIG
-      # ============================================================
+          grep '^CONFIG_NOMOUNT=y' \
+            arch/arm64/configs/mb56_defconfig
+
       - name: Prepare kernel config
         run: |
+          set -e
+
           export ARCH=arm64
           export SUBARCH=arm64
-
           export PATH="$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/llvm24/bin:$PATH"
-
           export LLVM=1
           export LLVM_IAS=1
           export CROSS_COMPILE=aarch64-linux-gnu-
 
-          export LD=ld.lld
-          export AR=llvm-ar
-          export NM=llvm-nm
-          export OBJCOPY=llvm-objcopy
-          export OBJDUMP=llvm-objdump
-          export OBJSIZE=llvm-size
-          export STRIP=llvm-strip
-
           mkdir -p out
 
           make O=out ARCH=arm64 mb56_defconfig
-
           make O=out ARCH=arm64 olddefconfig
 
-          echo "Final kernel release:"
-          make O=out ARCH=arm64 kernelrelease
+          echo "Kernel release:"
+          cat out/include/config/kernel.release
 
-      # ============================================================
-      # VERIFY RESUKISU MANUAL HOOK
-      # ============================================================
-      - name: Verify ReSukiSU Manual Hook
-        run: |
-          grep -q '^CONFIG_KSU=y' out/.config
-          grep -q '^CONFIG_KSU_MANUAL_HOOK=y' out/.config
-
-          echo "ReSukiSU: OK"
-          echo "Manual Hook: OK"
-
-      # ============================================================
-      # VERIFY NOMOUNT
-      # ============================================================
-      - name: Verify NoMount
-        run: |
-          test -d fs/nomount
-
-          grep -q '^CONFIG_NOMOUNT=y' out/.config
-
-          echo "NoMount: OK"
-
-      # ============================================================
-      # VERIFY EXACT KERNEL VERSION
-      # ============================================================
       - name: Verify exact kernel version
         run: |
-          VERSION="$(make O=out ARCH=arm64 kernelrelease)"
+          set -e
+
+          VERSION="$(cat out/include/config/kernel.release)"
 
           echo "Kernel release: $VERSION"
 
           test "$VERSION" = "4.19.325-cip136-st20-#ice bear++"
 
-      # ============================================================
-      # BUILD KERNEL
-      # ============================================================
       - name: Build kernel
         run: |
+          set -e
+
           export ARCH=arm64
           export SUBARCH=arm64
-
           export PATH="$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/llvm24/bin:$PATH"
-
           export LLVM=1
           export LLVM_IAS=1
           export CROSS_COMPILE=aarch64-linux-gnu-
-
-          export LD=ld.lld
-          export AR=llvm-ar
-          export NM=llvm-nm
-          export OBJCOPY=llvm-objcopy
-          export OBJDUMP=llvm-objdump
-          export OBJSIZE=llvm-size
-          export STRIP=llvm-strip
 
           make -j"$(nproc)" \
             O=out \
@@ -288,31 +181,20 @@ jobs:
             Image.gz \
             dtbs
 
-      # ============================================================
-      # VERIFY IMAGE
-      # ============================================================
       - name: Verify kernel image
         run: |
+          set -e
+
           test -f out/arch/arm64/boot/Image.gz
 
-          echo "Image.gz:"
           ls -lh out/arch/arm64/boot/Image.gz
 
-          echo "DTBs:"
-          find out/arch/arm64/boot/dts -type f -name "*.dtb" -print
-
-      # ============================================================
-      # CLONE ANYKERNEL3
-      # ============================================================
       - name: Clone AnyKernel3
         run: |
           git clone \
             https://github.com/osm0sis/AnyKernel3.git \
             anykernel
 
-      # ============================================================
-      # CONFIGURE ANYKERNEL3
-      # ============================================================
       - name: Configure AnyKernel3
         run: |
           cat > anykernel/anykernel.sh <<'EOF'
@@ -320,7 +202,7 @@ jobs:
           ## osm0sis @ xda-developers
 
           properties() { '
-          kernel.string=#ice bear++-gale-kernel
+          kernel.string=#ice bear++-gale-kernel by zauksk on telegram
           do.devicecheck=1
           do.modules=0
           do.systemless=1
@@ -334,46 +216,40 @@ jobs:
           '; }
 
           boot_attributes() {
-          set_perm_recursive 0 0 755 644 $RAMDISK/*;
-          set_perm_recursive 0 0 750 750 $RAMDISK/init* $RAMDISK/sbin;
+          set_perm_recursive 0 0 755 644 $RAMDISK/*
+          set_perm_recursive 0 0 750 750 $RAMDISK/init* $RAMDISK/sbin
           }
 
-          BLOCK=/dev/block/by-name/boot;
-          IS_SLOT_DEVICE=1;
-          RAMDISK_COMPRESSION=auto;
-          PATCH_VBMETA_FLAG=auto;
+          BLOCK=/dev/block/by-name/boot
+          IS_SLOT_DEVICE=1
+          RAMDISK_COMPRESSION=auto
+          PATCH_VBMETA_FLAG=auto
 
-          . tools/ak3-core.sh;
+          . tools/ak3-core.sh
 
-          dump_boot;
+          dump_boot
 
-          backup_file init.rc;
-          replace_string init.rc "cpuctl cpu,timer_slack" "mount cgroup none /dev/cpuctl cpu" "mount cgroup none /dev/cpuctl cpu,timer_slack";
+          backup_file init.rc
+          replace_string init.rc "cpuctl cpu,timer_slack" "mount cgroup none /dev/cpuctl cpu" "mount cgroup none /dev/cpuctl cpu,timer_slack"
 
-          backup_file init.tuna.rc;
-          insert_line init.tuna.rc "nodiratime barrier=0" after "mount_all /fstab.tuna" "\tmount ext4 /dev/block/by-name/userdata /data remount nosuid nodev noatime nodiratime barrier=0";
-          append_file init.tuna.rc "bootscript" init.tuna;
+          backup_file init.tuna.rc
+          insert_line init.tuna.rc "nodiratime barrier=0" after "mount_all /fstab.tuna" "\tmount ext4 /dev/block/by-name/userdata /data remount nosuid nodev noatime nodiratime barrier=0"
+          append_file init.tuna.rc "bootscript" init.tuna
 
-          backup_file fstab.tuna;
-          patch_fstab fstab.tuna /system ext4 options "noatime,barrier=1" "noatime,nodiratime,barrier=0";
-          patch_fstab fstab.tuna /cache ext4 options "barrier=1" "barrier=0,nomblk_io_submit";
-          patch_fstab fstab.tuna /data ext4 options "data=ordered" "nomblk_io_submit,data=writeback";
-          append_file fstab.tuna "usbdisk" fstab;
+          backup_file fstab.tuna
+          patch_fstab fstab.tuna /system ext4 options "noatime,barrier=1" "noatime,nodiratime,barrier=0"
+          patch_fstab fstab.tuna /cache ext4 options "barrier=1" "barrier=0,nomblk_io_submit"
+          patch_fstab fstab.tuna /data ext4 options "data=ordered" "nomblk_io_submit,data=writeback"
+          append_file fstab.tuna "usbdisk" fstab
 
-          flash_boot;
+          flash_boot
           EOF
 
-      # ============================================================
-      # COPY KERNEL IMAGE
-      # ============================================================
       - name: Copy kernel image
         run: |
           cp out/arch/arm64/boot/Image.gz \
             anykernel/Image.gz
 
-      # ============================================================
-      # CREATE PLACEHOLDER DIRECTORIES
-      # ============================================================
       - name: Prepare AnyKernel directories
         run: |
           mkdir -p anykernel/modules
@@ -384,9 +260,6 @@ jobs:
           touch anykernel/patch/.placeholder
           touch anykernel/ramdisk/.placeholder
 
-      # ============================================================
-      # REMOVE UNNECESSARY FILES
-      # ============================================================
       - name: Clean AnyKernel3 package
         run: |
           rm -rf anykernel/.git
@@ -394,9 +267,6 @@ jobs:
           rm -f anykernel/LICENSE
           rm -f anykernel/README.md
 
-      # ============================================================
-      # CREATE FLASHABLE ZIP
-      # ============================================================
       - name: Create flashable ZIP
         run: |
           cd anykernel
@@ -413,9 +283,6 @@ jobs:
           ls -lh \
             ice-bear-ReSukiSU-CIP136-ST20-gale.zip
 
-      # ============================================================
-      # UPLOAD FLASHABLE ZIP
-      # ============================================================
       - name: Upload flashable ZIP
         uses: actions/upload-artifact@v4
         with:
