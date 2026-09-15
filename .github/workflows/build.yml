@@ -15,11 +15,16 @@ jobs:
           ref: dev
           fetch-depth: 1
 
-      - name: Checkout builder repository
+      - name: Checkout builder files
         uses: actions/checkout@v4
         with:
-          repository: Krisnaa19/kernel_builder_gale
           path: builder
+
+      - name: Install MB56 defconfig
+        run: |
+          cp builder/configs/mb56_defconfig arch/arm64/configs/mb56_defconfig
+          echo "MB56 defconfig installed:"
+          grep '^CONFIG_LOCALVERSION=' arch/arm64/configs/mb56_defconfig
 
       - name: Install dependencies
         run: |
@@ -28,45 +33,54 @@ jobs:
             bc bison flex build-essential clang lld llvm \
             gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
             libssl-dev libelf-dev libncurses5-dev libncurses-dev \
-            python3 python3-pip zip unzip cpio rsync git curl wget pahole \
-            lsb-release software-properties-common gnupg
-            
+            python3 cmake ninja-build python3-pip zip unzip cpio rsync git curl wget pahole
+
       - name: Install AArch64 GCC
         run: |
           sudo apt-get install -y gcc-aarch64-linux-gnu
 
-      - name: Install LLVM Clang 24 Resmi
+      - name: Build LLVM 24
         run: |
-          wget https://apt.llvm.org/llvm.sh
-          chmod +x llvm.sh
-          sudo ./llvm.sh 24 all
-          sudo ln -sf /usr/bin/clang-24 /usr/bin/clang
-          sudo ln -sf /usr/bin/ld.lld-24 /usr/bin/ld.lld
-          sudo ln -sf /usr/bin/llvm-ar-24 /usr/bin/llvm-ar
-          sudo ln -sf /usr/bin/llvm-nm-24 /usr/bin/llvm-nm
-          sudo ln -sf /usr/bin/llvm-objcopy-24 /usr/bin/llvm-objcopy
-          sudo ln -sf /usr/bin/llvm-objdump-24 /usr/bin/llvm-objdump
-          sudo ln -sf /usr/bin/llvm-size-24 /usr/bin/llvm-size
-          sudo ln -sf /usr/bin/llvm-strip-24 /usr/bin/llvm-strip
+          git clone https://github.com/llvm/llvm-project.git llvm-project
+          cd llvm-project
+          git checkout 598f15297528855682dcf381575a9c14a7faabc3
+          cmake -S llvm -B build \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DLLVM_ENABLE_PROJECTS="clang;lld" \
+            -DLLVM_TARGETS_TO_BUILD="AArch64;ARM;X86" \
+            -DLLVM_ENABLE_TERMINFO=OFF
+          cmake --build build -j"$(nproc)"
+          mkdir -p "$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/llvm24/bin"
+          cp build/bin/clang* \
+            "$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/llvm24/bin/"
+          cp build/bin/ld.lld \
+            "$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/llvm24/bin/"
+          cp build/bin/llvm-* \
+            "$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/llvm24/bin/"
 
-      - name: Verify Clang
+      - name: Verify LLVM 24
         run: |
-          clang --version
-          ld.lld --version
-          llvm-ar --version
-          llvm-nm --version
-          llvm-objcopy --version
-          llvm-objdump --version
-          llvm-size --version
-          llvm-strip --version
+          export CLANG="$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/llvm24/bin"
+          "$CLANG/clang" --version
+          "$CLANG/ld.lld" --version
+          "$CLANG/llvm-ar" --version
+          "$CLANG/llvm-nm" --version
+          "$CLANG/llvm-objcopy" --version
+          "$CLANG/llvm-objdump" --version
+          "$CLANG/llvm-size" --version
+          "$CLANG/llvm-strip" --version
 
       - name: Verify kernel base
         run: |
           grep -E '^(VERSION|PATCHLEVEL|SUBLEVEL|EXTRAVERSION)' Makefile
+
           echo "CIP:"
-          cat localversion-cip || true
+          cat localversion-cip
+
           echo "ST:"
-          cat localversion-st || true
+          cat localversion-st
+
           echo "Expected base version:"
           echo "4.19.325-cip136-st20"
 
@@ -82,55 +96,20 @@ jobs:
             "https://raw.githubusercontent.com/maxsteeel/nomount/v2.0.0/kernel/setup.sh" \
             | bash -s v2.0.0
 
-      - name: Rename kernel to #ice bear++
+      - name: Verify MB56 config
         run: |
-          echo "Original CONFIG_LOCALVERSION:"
-          grep '^CONFIG_LOCALVERSION=' arch/arm64/configs/gale_defconfig || true
-          sed -i 's/^CONFIG_LOCALVERSION=.*/CONFIG_LOCALVERSION="-#ice bear++"/' arch/arm64/configs/gale_defconfig
-          echo "New CONFIG_LOCALVERSION:"
-          grep '^CONFIG_LOCALVERSION=' arch/arm64/configs/gale_defconfig
-          # Sync Moonbeam-style scheduler config
-          sed -i '/^CONFIG_DEFAULT_MQ_IOSCHED_ADIOS=y$/d' arch/arm64/configs/gale_defconfig
-          sed -i '/^CONFIG_MQ_IOSCHED_ADIOS=y$/d' arch/arm64/configs/gale_defconfig
-          grep -q '^CONFIG_MQ_IOSCHED_SSG=y$' arch/arm64/configs/gale_defconfig || echo 'CONFIG_MQ_IOSCHED_SSG=y' >> arch/arm64/configs/gale_defconfig
-          grep -q '^CONFIG_MQ_IOSCHED_SSG_CGROUP=y$' arch/arm64/configs/gale_defconfig || echo 'CONFIG_MQ_IOSCHED_SSG_CGROUP=y' >> arch/arm64/configs/gale_defconfig
-          grep -q '^CONFIG_NET_SCH_CAKE=y$' arch/arm64/configs/gale_defconfig || echo 'CONFIG_NET_SCH_CAKE=y' >> arch/arm64/configs/gale_defconfig
-          echo "Scheduler config:"
-          grep -E 'CONFIG_(MQ_IOSCHED_ADIOS|MQ_IOSCHED_SSG|MQ_IOSCHED_SSG_CGROUP|NET_SCH_CAKE)' arch/arm64/configs/gale_defconfig || true
+          echo "Using MB56 config with #ice bear++ branding"
+          grep '^CONFIG_LOCALVERSION=' arch/arm64/configs/mb56_defconfig
+          echo -n "CIP = "
+          cat localversion-cip
+          echo -n "ST  = "
+          cat localversion-st
 
       - name: Prepare kernel config
         run: |
           export ARCH=arm64
-          mkdir -p out
-          make O=out ARCH=arm64 gale_defconfig
-          scripts/config --file out/.config --enable CONFIG_KSU
-          scripts/config --file out/.config --enable CONFIG_KSU_MANUAL_HOOK
-          scripts/config --file out/.config --enable CONFIG_NOMOUNT
-          scripts/config --file out/.config --disable CONFIG_LLVM_POLLY
-          scripts/config --file out/.config --set-str CONFIG_LOCALVERSION "-#ice bear++"
-          scripts/config --file out/.config --disable CONFIG_LOCALVERSION_AUTO
-          make O=out ARCH=arm64 olddefconfig
-          echo "=== Final scheduler configuration ==="
-          grep -E 'CONFIG_(MQ_IOSCHED_ADIOS|MQ_IOSCHED_SSG|MQ_IOSCHED_SSG_CGROUP|NET_SCH_CAKE)' out/.config || true
-          echo "=== Kernel release ==="
-          make -s --no-print-directory O=out ARCH=arm64 kernelrelease
-
-      - name: Verify ReSukiSU Manual Hook
-        run: |
-          grep -q '^CONFIG_KSU=y' out/.config
-          grep -q '^CONFIG_KSU_MANUAL_HOOK=y' out/.config
-          echo "ReSukiSU Manual Hook: OK"
-
-      - name: Verify NoMount
-        run: |
-          test -d fs/nomount
-          grep -q '^CONFIG_NOMOUNT=y' out/.config
-          echo "NoMount: OK"
-
-      - name: Build kernel
-        run: |
-          export ARCH=arm64
           export SUBARCH=arm64
+          export PATH="$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/llvm24/bin:$PATH"
           export LLVM=1
           export LLVM_IAS=1
           export CROSS_COMPILE=aarch64-linux-gnu-
@@ -142,6 +121,74 @@ jobs:
           export OBJDUMP=llvm-objdump
           export OBJSIZE=llvm-size
           export STRIP=llvm-strip
+
+          mkdir -p out
+          make O=out ARCH=arm64 mb56_defconfig
+          make O=out ARCH=arm64 olddefconfig
+
+          echo "=== Final MB56 configuration ==="
+          grep -E 'CONFIG_(LOCALVERSION|LOCALVERSION_AUTO|KSU|KSU_MANUAL_HOOK|NOMOUNT|CLANG_VERSION|LLD_VERSION|LTO_CLANG|THINLTO|RELR)' out/.config || true
+
+          echo "=== Kernel release ==="
+          make -s --no-print-directory             O=out ARCH=arm64 kernelrelease
+
+      - name: Verify ReSukiSU Manual Hook
+        run: |
+          grep -q '^CONFIG_KSU=y' out/.config
+          grep -q '^CONFIG_KSU_MANUAL_HOOK=y' out/.config
+
+          echo "ReSukiSU Manual Hook: OK"
+
+      - name: Verify NoMount
+        run: |
+          test -d fs/nomount
+
+          grep -q '^CONFIG_NOMOUNT=y' out/.config
+
+          echo "NoMount: OK"
+
+      - name: Verify kernel version string
+        run: |
+          VERSION="$(make -s --no-print-directory \
+            O=out ARCH=arm64 kernelrelease \
+            | grep -E '^[0-9]' \
+            | tr -d '\r\n')"
+
+          echo "Actual:"
+          echo "$VERSION"
+
+          echo "Expected:"
+          echo "4.19.325-cip136-st20-#ice bear++"
+
+          if [ "$VERSION" != "4.19.325-cip136-st20-#ice bear++" ]; then
+            echo "ERROR: Kernel version mismatch!"
+            echo "Actual: $VERSION"
+            exit 1
+          fi
+
+          echo "VERSION CHECK: PASS"
+
+      - name: Build kernel
+        run: |
+          export ARCH=arm64
+          export SUBARCH=arm64
+
+          export PATH="$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/llvm24/bin:$PATH"
+
+          export LLVM=1
+          export LLVM_IAS=1
+
+          export CROSS_COMPILE=aarch64-linux-gnu-
+
+          export CC=clang
+          export LD=ld.lld
+          export AR=llvm-ar
+          export NM=llvm-nm
+          export OBJCOPY=llvm-objcopy
+          export OBJDUMP=llvm-objdump
+          export OBJSIZE=llvm-size
+          export STRIP=llvm-strip
+
           make -j"$(nproc)" \
             O=out \
             ARCH=arm64 \
@@ -154,32 +201,59 @@ jobs:
         run: |
           if [ -f out/arch/arm64/boot/Image.gz ]; then
             cp out/arch/arm64/boot/Image.gz Image.gz
+
           elif [ -f out/arch/arm64/boot/Image ]; then
             cp out/arch/arm64/boot/Image Image
+
           else
             echo "ERROR: Kernel image not found!"
-            find out/arch/arm64/boot -maxdepth 2 -type f -print
+
+            find out/arch/arm64/boot \
+              -maxdepth 2 \
+              -type f \
+              -print
+
             exit 1
           fi
 
-      - name: Prepare AnyKernel3 (Standar osm0sis)
+      - name: Verify kernel build
         run: |
-          git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git anykernel
+          echo "=== Kernel release ==="
+
+          make -s --no-print-directory \
+            O=out ARCH=arm64 kernelrelease
+
+          echo "=== Kernel version ==="
+
+          make -s --no-print-directory \
+            O=out ARCH=arm64 kernelversion
+
+          echo "=== Kernel image ==="
+
+          ls -lh Image* 2>/dev/null || true
+
+          echo "=== Important config ==="
+
+          grep -E \
+            'CONFIG_(LOCALVERSION|LOCALVERSION_AUTO|KSU|KSU_MANUAL_HOOK|NOMOUNT)' \
+            out/.config || true
+
+      - name: Prepare AnyKernel3
+        run: |
+          git clone --depth=1 \
+            https://github.com/osm0sis/AnyKernel3.git \
+            anykernel
+
           rm -rf anykernel/.git
 
-      - name: Configure AnyKernel3 (Moonbeam Script)
+      - name: Configure AnyKernel3
         run: |
           cat > anykernel/anykernel.sh <<'EOF'
-          ### AnyKernel3 Ramdisk Mod Script
-          ## osm0sis @ xda-developers
-
-          ### AnyKernel setup
-          # global properties
           properties() { '
           kernel.string=#ice bear++ Kernel - ReSukiSU - NoMount
           do.devicecheck=1
           do.modules=0
-          do.systemless=1
+          do.systemless=0
           do.cleanup=1
           do.cleanuponabort=0
           device.name1=gale
@@ -187,52 +261,27 @@ jobs:
           supported.versions=
           supported.patchlevels=
           supported.vendorpatchlevels=
-          '; } # end properties
+          '; }
 
-          ### AnyKernel install
-          ## boot files attributes
-          boot_attributes() {
-          set_perm_recursive 0 0 755 644 $RAMDISK/*;
-          set_perm_recursive 0 0 750 750 $RAMDISK/init* $RAMDISK/sbin;
-          } # end attributes
+          block=auto;
+          is_slot_device=auto;
+          ramdisk_compression=auto;
+          patch_vbmeta_flag=auto;
 
-          # boot shell variables
-          BLOCK=/dev/block/by-name/boot;
-          IS_SLOT_DEVICE=1;
-          RAMDISK_COMPRESSION=auto;
-          PATCH_VBMETA_FLAG=auto;
-
-          # import functions/variables and setup patching - see for reference (DO NOT REMOVE)
           . tools/ak3-core.sh;
 
-          # boot install
-          dump_boot; # use split_boot to skip ramdisk unpack, e.g. for devices with init_boot ramdisk
-
-          # init.rc
-          backup_file init.rc;
-          replace_string init.rc "cpuctl cpu,timer_slack" "mount cgroup none /dev/cpuctl cpu" "mount cgroup none /dev/cpuctl cpu,timer_slack";
-
-          # init.tuna.rc
-          backup_file init.tuna.rc;
-          insert_line init.tuna.rc "nodiratime barrier=0" after "mount_all /fstab.tuna" "\tmount ext4 /dev/block/by-name/userdata /data remount nosuid nodev noatime nodiratime barrier=0";
-          append_file init.tuna.rc "bootscript" init.tuna;
-
-          # fstab.tuna
-          backup_file fstab.tuna;
-          patch_fstab fstab.tuna /system ext4 options "noatime,barrier=1" "noatime,nodiratime,barrier=0";
-          patch_fstab fstab.tuna /cache ext4 options "barrier=1" "barrier=0,nomblk_io_submit";
-          patch_fstab fstab.tuna /data ext4 options "data=ordered" "nomblk_io_submit,data=writeback";
-          append_file fstab.tuna "usbdisk" fstab;
-
-          flash_boot; # NÃO faz repack do ramdisk, apenas atualiza kernel
+          dump_boot;
+          write_boot;
           EOF
 
       - name: Copy kernel to AnyKernel3
         run: |
           if [ -f Image.gz ]; then
             cp Image.gz anykernel/Image.gz
+
           elif [ -f Image ]; then
             cp Image anykernel/Image
+
           else
             echo "ERROR: Image/Image.gz missing"
             exit 1
@@ -241,30 +290,78 @@ jobs:
       - name: Clean AnyKernel3 package
         run: |
           cd anykernel
+
           rm -rf .github
           rm -f LICENSE
           rm -f README.md
+          rm -f ZAUKSK_BUILD_INFO.txt
+
           echo "=== Final AnyKernel3 files ==="
+
           find . -maxdepth 2 -type f | sort
 
       - name: Create flashable ZIP
         run: |
           ZIP_NAME="ice-bear-ReSukiSU-CIP136-ST20-gale.zip"
+
           cd anykernel
+
           rm -f "../$ZIP_NAME"
-          FILES=("META-INF" "modules" "patch" "ramdisk" "tools" "anykernel.sh" "banner")
+
+          FILES=(
+            "META-INF"
+            "modules"
+            "patch"
+            "ramdisk"
+            "tools"
+            "anykernel.sh"
+            "banner"
+          )
+
           if [ -f Image.gz ]; then
             FILES+=("Image.gz")
+
           elif [ -f Image ]; then
             FILES+=("Image")
+
+          else
+            echo "ERROR: Image/Image.gz missing"
+            exit 1
           fi
+
           zip -r9 "../$ZIP_NAME" "${FILES[@]}"
+
           cd ..
+
+          test -f "$ZIP_NAME"
+
+          echo "=== Flashable ZIP ==="
           ls -lh "$ZIP_NAME"
+
+      - name: Validate final ZIP
+        run: |
+          ZIP="ice-bear-ReSukiSU-CIP136-ST20-gale.zip"
+
+          test -f "$ZIP"
+
+          echo "=== ZIP contents ==="
+
+          unzip -l "$ZIP"
+
+          echo "=== Required files ==="
+
+          unzip -l "$ZIP" | grep -E \
+            'META-INF/|modules/|patch/|ramdisk/|tools/|anykernel.sh|banner|Image.gz|Image'
+
+          echo "ZIP VALIDATION: PASS"
 
       - name: Generate SHA256
         run: |
-          sha256sum ice-bear-ReSukiSU-CIP136-ST20-gale.zip > SHA256SUMS.txt
+          sha256sum \
+            ice-bear-ReSukiSU-CIP136-ST20-gale.zip \
+            > SHA256SUMS.txt
+
+          cat SHA256SUMS.txt
 
       - name: Upload flashable ZIP
         uses: actions/upload-artifact@v4
@@ -273,4 +370,21 @@ jobs:
           path: |
             ice-bear-ReSukiSU-CIP136-ST20-gale.zip
             SHA256SUMS.txt
-            
+
+      - name: Complete
+        run: |
+          echo "========================================"
+          echo "BUILD SUCCESS"
+          echo "========================================"
+
+          echo "Kernel:"
+          make -s --no-print-directory \
+            O=out ARCH=arm64 kernelrelease
+
+          echo "Expected:"
+          echo "4.19.325-cip136-st20-#ice bear++"
+
+          echo "ZIP:"
+          echo "ice-bear-ReSukiSU-CIP136-ST20-gale.zip"
+
+          echo "========================================"
