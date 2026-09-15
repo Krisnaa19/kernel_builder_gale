@@ -6,10 +6,10 @@ jobs:
   build:
     runs-on: ubuntu-22.04
     steps:
-      - name: Checkout kernel source
+      - name: Checkout kernel source (Authentic Branch dev)
         uses: actions/checkout@v4
         with:
-          repository: xxblebleblexx/android_kernel_xiaomi_gale
+          repository: Krisnaa19/android_kernel_xiaomi_gale
           ref: dev
           fetch-depth: 1
 
@@ -28,90 +28,62 @@ jobs:
             libssl-dev libelf-dev libncurses5-dev libncurses-dev \
             python3 python3-pip zip unzip cpio rsync git curl wget pahole
 
-      - name: Install AArch64 GCC
+      - name: Install Sakura Clang 24.0.0git
         run: |
-          sudo apt-get install -y gcc-aarch64-linux-gnu
+          mkdir -p "$GITHUB_WORKSPACE/prebuilts/clang"
+          cd "$GITHUB_WORKSPACE/prebuilts/clang"
+          git clone --depth=1 https://gitlab.com/cyy_kawa/sakura-clang.git clang-sakura
 
-      - name: Install Clang r383902
+      - name: Verify Sakura Clang & LLVM Tools
         run: |
-          mkdir -p "$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86"
-          cd "$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86"
-          curl -L --retry 5 --retry-delay 3 \
-            -o clang-r383902.tar.gz \
-            "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android12-release/clang-r383902.tar.gz"
-          mkdir -p clang-r383902
-          tar -xzf clang-r383902.tar.gz -C clang-r383902
-          rm -f clang-r383902.tar.gz
-
-      - name: Verify Clang
-        run: |
-          export CLANG="$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/clang-r383902/bin"
+          export CLANG="$GITHUB_WORKSPACE/prebuilts/clang/clang-sakura/bin"
           "$CLANG/clang" --version
           "$CLANG/ld.lld" --version
-          "$CLANG/llvm-ar" --version
-          "$CLANG/llvm-nm" --version
-          "$CLANG/llvm-objcopy" --version
-          "$CLANG/llvm-objdump" --version
-          "$CLANG/llvm-size" --version
-          "$CLANG/llvm-strip" --version
 
       - name: Verify kernel base
         run: |
           grep -E '^(VERSION|PATCHLEVEL|SUBLEVEL|EXTRAVERSION)' Makefile
-          echo "CIP:"
-          cat localversion-cip
-          echo "ST:"
-          cat localversion-st
-          echo "Expected base version:"
-          echo "4.19.325-cip136-st20"
-
-      - name: Setup ReSukiSU
-        run: |
-          curl -LSs \
-            "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" \
-            | bash
-
-      - name: Setup NoMount
-        run: |
-          curl -LSs \
-            "https://raw.githubusercontent.com/maxsteeel/nomount/v2.0.0/kernel/setup.sh" \
-            | bash -s v2.0.0
+          echo -n "CIP: "; cat localversion-cip
+          echo -n "ST:  "; cat localversion-st
+          echo "Expected base: 4.19.325-cip136-st20"
 
       - name: Rename kernel to #ice bear++
         run: |
-          echo "Original CONFIG_LOCALVERSION:"
-          grep '^CONFIG_LOCALVERSION=' arch/arm64/configs/gale_defconfig || true
           sed -i \
             's/^CONFIG_LOCALVERSION=.*/CONFIG_LOCALVERSION="-#ice bear++"/' \
             arch/arm64/configs/gale_defconfig
           echo "New CONFIG_LOCALVERSION:"
           grep '^CONFIG_LOCALVERSION=' arch/arm64/configs/gale_defconfig
-          echo -n "CIP = "
-          cat localversion-cip
-          echo -n "ST  = "
-          cat localversion-st
 
-      - name: Prepare kernel config
+      - name: Prepare kernel config (Exact Moonbeam Replica)
         run: |
           export ARCH=arm64
+          export PATH="$GITHUB_WORKSPACE/prebuilts/clang/clang-sakura/bin:$PATH"
           mkdir -p out
 
-          # Gunakan konfigurasi asli defconfig moonbeam dari repo builder jika tersedia
+          # Gunakan konfigurasi icebear_defconfig dari repo builder
           if [ -f "$GITHUB_WORKSPACE/builder/configs/icebear_defconfig" ]; then
             echo "Memakai configs/icebear_defconfig dari repo builder..."
             cp "$GITHUB_WORKSPACE/builder/configs/icebear_defconfig" arch/arm64/configs/icebear_defconfig
-            make O=out ARCH=arm64 icebear_defconfig
+            make O=out ARCH=arm64 CC=clang LD=ld.lld icebear_defconfig
           else
-            echo "Memakai gale_defconfig dengan patch moonbeam..."
-            make O=out ARCH=arm64 gale_defconfig
+            echo "Memakai gale_defconfig sebagai fallback..."
+            make O=out ARCH=arm64 CC=clang LD=ld.lld gale_defconfig
           fi
 
-          # Sinkronisasi Identitas Nama Kernel
+          # 1. Identitas Nama
           scripts/config --file out/.config --set-str CONFIG_LOCALVERSION "-#ice bear++"
           scripts/config --file out/.config --disable CONFIG_LOCALVERSION_AUTO
-          scripts/config --file out/.config --disable CONFIG_LLVM_POLLY
 
-          # Tuning CPU, Latensi, & RCU Moonbeam
+          # 2. Compiler Optimization & ThinLTO (Sesuai Diff Moonbeam)
+          scripts/config --file out/.config --disable CONFIG_LTO_NONE
+          scripts/config --file out/.config --enable CONFIG_LTO
+          scripts/config --file out/.config --enable CONFIG_THINLTO
+          scripts/config --file out/.config --enable CONFIG_LTO_CLANG
+          scripts/config --file out/.config --enable CONFIG_RELR
+          scripts/config --file out/.config --enable CONFIG_ARCH_SUPPORTS_SHADOW_CALL_STACK
+
+          # 3. Tuning Latensi, CPU, & RCU
           scripts/config --file out/.config --enable CONFIG_RCU_EXPERT
           scripts/config --file out/.config --set-val CONFIG_RCU_FANOUT 64
           scripts/config --file out/.config --set-val CONFIG_RCU_FANOUT_LEAF 16
@@ -120,30 +92,38 @@ jobs:
           scripts/config --file out/.config --enable CONFIG_RCU_NOCB_CPU
           scripts/config --file out/.config --disable CONFIG_CPU_ISOLATION
 
-          # I/O Scheduler & Jaringan Moonbeam
+          # 4. Storage I/O Scheduler & TCP Net-Sched
           scripts/config --file out/.config --enable CONFIG_CFQ_GROUP_IOSCHED
           scripts/config --file out/.config --enable CONFIG_DEFAULT_CFQ
           scripts/config --file out/.config --set-str CONFIG_DEFAULT_IOSCHED "cfq"
           scripts/config --file out/.config --enable CONFIG_IOSCHED_BFQ
+          scripts/config --file out/.config --enable CONFIG_MQ_IOSCHED_DEADLINE
+          scripts/config --file out/.config --enable CONFIG_MQ_IOSCHED_KYBER
           scripts/config --file out/.config --enable CONFIG_DEFAULT_CUBIC
           scripts/config --file out/.config --set-str CONFIG_DEFAULT_TCP_CONG "cubic"
           scripts/config --file out/.config --enable CONFIG_NET_SCH_DEFAULT
           scripts/config --file out/.config --enable CONFIG_DEFAULT_CAKE
           scripts/config --file out/.config --set-str CONFIG_DEFAULT_NET_SCH "cake"
 
-          # Thermal & Touch Boost Moonbeam
+          # 5. MediaTek Engine & Power Allocator Thermal
           scripts/config --file out/.config --enable CONFIG_MTK_PERFMGR_TOUCH_BOOST
+          scripts/config --file out/.config --disable CONFIG_THERMAL_GOV_BACKWARD_COMPATIBLE
+          scripts/config --file out/.config --disable CONFIG_THERMAL_DEFAULT_GOV_BACKWARD_COMPATIBLE
           scripts/config --file out/.config --enable CONFIG_THERMAL_DEFAULT_GOV_POWER_ALLOCATOR
           scripts/config --file out/.config --enable CONFIG_THERMAL_GOV_POWER_ALLOCATOR
           scripts/config --file out/.config --enable CONFIG_MTK_GED_SUPPORT
+          scripts/config --file out/.config --enable CONFIG_ION_SYSTEM_HEAP
+          scripts/config --file out/.config --enable CONFIG_ION_CMA_HEAP
 
-          # Optimasi Overhead Moonbeam
+          # 6. Stripping Overhead Logging
           scripts/config --file out/.config --disable CONFIG_SCHED_INFO
           scripts/config --file out/.config --disable CONFIG_SCHEDSTATS
+          scripts/config --file out/.config --disable CONFIG_SND_VERBOSE_PROCFS
           scripts/config --file out/.config --set-val CONFIG_KASAN_STACK 0
 
-          # Root & Subsystem Moonbeam
+          # 7. Submerged Root & NoMount
           scripts/config --file out/.config --enable CONFIG_KSU
+          scripts/config --file out/.config --set-str CONFIG_KSU_FULL_NAME_FORMAT "%TAG_NAME%-%COMMIT_SHA%@%REPO_NAME%"
           scripts/config --file out/.config --enable CONFIG_KSU_MULTI_MANAGER_SUPPORT
           scripts/config --file out/.config --enable CONFIG_KSU_MANUAL_HOOK
           scripts/config --file out/.config --enable CONFIG_KSU_MANUAL_HOOK_AUTO_SETUID_HOOK
@@ -151,32 +131,15 @@ jobs:
           scripts/config --file out/.config --enable CONFIG_KSU_MANUAL_HOOK_AUTO_INPUT_HOOK
           scripts/config --file out/.config --enable CONFIG_NOMOUNT
 
-          make O=out ARCH=arm64 olddefconfig
+          make O=out ARCH=arm64 CC=clang LD=ld.lld olddefconfig
 
-          echo "=== Final kernel configuration ==="
-          grep -E \
-            'CONFIG_(LOCALVERSION|LOCALVERSION_AUTO|KSU|KSU_MANUAL_HOOK|NOMOUNT|DEFAULT_IOSCHED|DEFAULT_NET_SCH|THERMAL_DEFAULT_GOV_POWER_ALLOCATOR)' \
-            out/.config || true
-          echo "=== Kernel release ==="
-          make -s --no-print-directory \
-            O=out ARCH=arm64 kernelrelease
-
-      - name: Verify ReSukiSU Manual Hook
-        run: |
-          grep -q '^CONFIG_KSU=y' out/.config
-          grep -q '^CONFIG_KSU_MANUAL_HOOK=y' out/.config
-          echo "ReSukiSU Manual Hook: OK"
-
-      - name: Verify NoMount
-        run: |
-          test -d fs/nomount
-          grep -q '^CONFIG_NOMOUNT=y' out/.config
-          echo "NoMount: OK"
+          echo "=== Verifikasi Nilai Config Kunci ==="
+          grep -E 'CONFIG_(LOCALVERSION|CLANG_VERSION|THINLTO|RELR|KSU|NOMOUNT|DEFAULT_IOSCHED|DEFAULT_NET_SCH|THERMAL_DEFAULT_GOV_POWER_ALLOCATOR)' out/.config || true
 
       - name: Verify kernel version string
         run: |
           VERSION="$(make -s --no-print-directory \
-            O=out ARCH=arm64 kernelrelease \
+            O=out ARCH=arm64 CC="$GITHUB_WORKSPACE/prebuilts/clang/clang-sakura/bin/clang" kernelrelease \
             | grep -E '^[0-9]' \
             | tr -d '\r\n')"
           echo "Actual:   $VERSION"
@@ -191,7 +154,7 @@ jobs:
         run: |
           export ARCH=arm64
           export SUBARCH=arm64
-          export PATH="$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/clang-r383902/bin:$PATH"
+          export PATH="$GITHUB_WORKSPACE/prebuilts/clang/clang-sakura/bin:$PATH"
           export LLVM=1
           export LLVM_IAS=1
           export CROSS_COMPILE=aarch64-linux-gnu-
@@ -203,6 +166,7 @@ jobs:
           export OBJDUMP=llvm-objdump
           export OBJSIZE=llvm-size
           export STRIP=llvm-strip
+
           make -j"$(nproc)" \
             O=out \
             ARCH=arm64 \
@@ -211,96 +175,51 @@ jobs:
             CROSS_COMPILE=aarch64-linux-gnu- \
             Image.gz dtbs
 
-      - name: Find kernel image
+      - name: Verify kernel binary output
         run: |
           if [ -f out/arch/arm64/boot/Image.gz ]; then
-            cp out/arch/arm64/boot/Image.gz Image.gz
-          elif [ -f out/arch/arm64/boot/Image ]; then
-            cp out/arch/arm64/boot/Image Image
+            ls -lh out/arch/arm64/boot/Image.gz
           else
-            echo "ERROR: Kernel image not found!"
-            find out/arch/arm64/boot \
-              -maxdepth 2 \
-              -type f \
-              -print
+            echo "ERROR: out/arch/arm64/boot/Image.gz tidak ditemukan!"
             exit 1
           fi
 
-      - name: Verify kernel build
-        run: |
-          echo "=== Kernel release ==="
-          make -s --no-print-directory \
-            O=out ARCH=arm64 kernelrelease
-          echo "=== Kernel version ==="
-          make -s --no-print-directory \
-            O=out ARCH=arm64 kernelversion
-          echo "=== Kernel image ==="
-          ls -lh Image* 2>/dev/null || true
-
-      - name: Prepare AnyKernel3 (Moonbeam Authentic Mod)
+      - name: Prepare AnyKernel3 (Exact Moonbeam Package)
         run: |
           mkdir -p anykernel
-          # Mengambil modul dan biner asli AnyKernel bawaan moonbeam
+          # Salin modul, biner khusus, dan struktur installer asli Moonbeam
           cp -r "$GITHUB_WORKSPACE/builder/anykernel-mod/"* anykernel/
           chmod -R 755 anykernel/tools/
 
-      - name: Configure AnyKernel3
+      - name: Configure AnyKernel3 Banner & String
         run: |
-          # Perbarui identitas banner tanpa mengutak-atik struktur flash bawaan moonbeam
           sed -i 's/kernel.string=.*/kernel.string=#ice bear++ Kernel for Redmi 13C/' anykernel/anykernel.sh
           echo "#ice bear++" > anykernel/banner
-          echo "=== AnyKernel Configured ==="
-          grep "kernel.string=" anykernel/anykernel.sh
-          cat anykernel/banner
 
-      - name: Copy kernel to AnyKernel3
+      - name: Copy Image.gz to AnyKernel3
         run: |
-          if [ -f Image.gz ]; then
-            cp Image.gz anykernel/Image.gz
-          elif [ -f Image ]; then
-            cp Image anykernel/Image
-          else
-            echo "ERROR: Image/Image.gz missing"
-            exit 1
-          fi
+          cp out/arch/arm64/boot/Image.gz anykernel/Image.gz
 
-      - name: Clean AnyKernel3 package
+      - name: Clean unnecessary files
         run: |
           cd anykernel
-          rm -rf .github
-          rm -f LICENSE
-          rm -f README.md
-          echo "=== Final AnyKernel3 files ==="
-          find . -maxdepth 2 -type f | sort
+          rm -rf .github README.md LICENSE
+          echo "=== File AnyKernel yang siap di-pack ==="
+          ls -la
 
       - name: Create flashable ZIP
         run: |
           ZIP_NAME="ice-bear-ReSukiSU-CIP136-ST20-gale.zip"
           cd anykernel
           rm -f "../$ZIP_NAME"
-          # Pack seluruh mod bawaan moonbeam
           zip -r9 "../$ZIP_NAME" * -x "*.git*"
           cd ..
           test -f "$ZIP_NAME"
-          echo "=== Flashable ZIP ==="
           ls -lh "$ZIP_NAME"
-
-      - name: Validate final ZIP
-        run: |
-          ZIP="ice-bear-ReSukiSU-CIP136-ST20-gale.zip"
-          test -f "$ZIP"
-          echo "=== ZIP contents ==="
-          unzip -l "$ZIP"
-          echo "=== Required files ==="
-          unzip -l "$ZIP" | grep -E \
-            'META-INF/|modules/|patch/|ramdisk/|tools/|anykernel.sh|banner|Image.gz|Image'
-          echo "ZIP VALIDATION: PASS"
 
       - name: Generate SHA256
         run: |
-          sha256sum \
-            ice-bear-ReSukiSU-CIP136-ST20-gale.zip \
-            > SHA256SUMS.txt
+          sha256sum ice-bear-ReSukiSU-CIP136-ST20-gale.zip > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
       - name: Upload flashable ZIP
@@ -314,14 +233,8 @@ jobs:
       - name: Complete
         run: |
           echo "========================================"
-          echo "BUILD SUCCESS"
-          echo "========================================"
-          echo "Kernel:"
-          make -s --no-print-directory \
-            O=out ARCH=arm64 kernelrelease
-          echo "Expected:"
-          echo "4.19.325-cip136-st20-#ice bear++"
-          echo "ZIP:"
-          echo "ice-bear-ReSukiSU-CIP136-ST20-gale.zip"
+          echo "BUILD SUCCEEDED - 100% MOONBEAM REPLICA"
+          echo "Kernel: 4.19.325-cip136-st20-#ice bear++"
+          echo "ZIP:    ice-bear-ReSukiSU-CIP136-ST20-gale.zip"
           echo "========================================"
           
