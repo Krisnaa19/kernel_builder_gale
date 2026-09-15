@@ -25,42 +25,45 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y bc bison flex build-essential clang lld llvm libssl-dev libelf-dev libncurses-dev ccache binutils-aarch64-linux-gnu binutils-arm-linux-gnueabi gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi zip unzip curl wget git libcap-dev python3
+          sudo apt-get install -y \
+            bc bison flex build-essential clang lld llvm \
+            libssl-dev libelf-dev libncurses-dev ccache \
+            binutils-aarch64-linux-gnu binutils-arm-linux-gnueabi \
+            gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi \
+            zip unzip curl wget git libcap-dev python3
 
       - name: Install Sakura Clang 24.0.0git
         run: |
           mkdir -p "$GITHUB_WORKSPACE/prebuilts/clang/clang-sakura/bin"
-          cd "$GITHUB_WORKSPACE/prebuilts/clang"
-          echo "Mengunduh engine LLVM..."
-          wget -q https://github.com/llvm/llvm-project/releases/download/llvmorg-19.1.0/clang+llvm-19.1.0-x86_64-linux-gnu-ubuntu-22.04.tar.xz -O llvm.tar.xz || wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r522817.tar.gz -O llvm.tar.gz
-          if [ -f llvm.tar.xz ]; then
-            tar -xf llvm.tar.xz -C clang-sakura --strip-components=1
-            rm -f llvm.tar.xz
-          elif [ -f llvm.tar.gz ]; then
-            tar -xzf llvm.tar.gz -C clang-sakura
-            rm -f llvm.tar.gz
-          fi
           CLANG_DIR="$GITHUB_WORKSPACE/prebuilts/clang/clang-sakura/bin"
-          [ -f "$CLANG_DIR/clang" ] && [ ! -f "$CLANG_DIR/clang.real" ] && mv "$CLANG_DIR/clang" "$CLANG_DIR/clang.real"
-          [ -f "$CLANG_DIR/ld.lld" ] && [ ! -f "$CLANG_DIR/ld.lld.real" ] && mv "$CLANG_DIR/ld.lld" "$CLANG_DIR/ld.lld.real"
+
+          # Tautkan tool LLVM bawaan runner
+          for tool in llvm-ar llvm-nm llvm-objcopy llvm-objdump llvm-strip; do
+            ln -sf "$(which $tool)" "$CLANG_DIR/$tool"
+          done
+
+          # Wrapper Clang agar mencetak signature Sakura Clang 24.0.0git
           cat << 'EOF' > "$CLANG_DIR/clang"
-          #!/bin/bash
-          if [[ "$*" == *"--version"* ]]; then
-            echo "Sakura clang version 24.0.0git (https://github.com/llvm/llvm-project.git 598f15297528855682dcf381575a9c14a7faabc3)"
-            echo "Target: aarch64-unknown-linux-gnu"
-            echo "Thread model: posix"
-            exit 0
-          fi
-          exec "$0.real" "$@"
-          EOF
+#!/bin/bash
+if [[ "$*" == *"--version"* ]]; then
+  echo "Sakura clang version 24.0.0git (https://github.com/llvm/llvm-project.git 598f15297528855682dcf381575a9c14a7faabc3)"
+  echo "Target: aarch64-unknown-linux-gnu"
+  echo "Thread model: posix"
+  exit 0
+fi
+exec /usr/bin/clang "$@"
+EOF
+
+          # Wrapper LLD agar mencetak signature Sakura LLD 24.0.0
           cat << 'EOF' > "$CLANG_DIR/ld.lld"
-          #!/bin/bash
-          if [[ "$*" == *"--version"* ]] || [[ "$*" == *"-v"* ]]; then
-            echo "Sakura LLD 24.0.0 (https://github.com/llvm/llvm-project.git 598f15297528855682dcf381575a9c14a7faabc3)"
-            exit 0
-          fi
-          exec "$0.real" "$@"
-          EOF
+#!/bin/bash
+if [[ "$*" == *"--version"* ]] || [[ "$*" == *"-v"* ]]; then
+  echo "Sakura LLD 24.0.0 (https://github.com/llvm/llvm-project.git 598f15297528855682dcf381575a9c14a7faabc3)"
+  exit 0
+fi
+exec /usr/bin/ld.lld "$@"
+EOF
+
           chmod +x "$CLANG_DIR/clang" "$CLANG_DIR/ld.lld"
 
       - name: Verify Sakura Clang & LLVM Tools
@@ -111,7 +114,21 @@ jobs:
           export HEADER_ARCH=arm64
           export KBUILD_BUILD_USER="root"
           export KBUILD_BUILD_HOST="d866820efa95"
-          make -j$(nproc --all) O=out ARCH=arm64 CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- Image.gz
+
+          make -j$(nproc --all) O=out \
+            ARCH=arm64 \
+            CC=clang \
+            LD=ld.lld \
+            AR=llvm-ar \
+            NM=llvm-nm \
+            OBJCOPY=llvm-objcopy \
+            OBJDUMP=llvm-objdump \
+            STRIP=llvm-strip \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            Image.gz
 
       - name: Verify kernel binary output
         run: |
@@ -120,6 +137,7 @@ jobs:
             exit 1
           fi
           ls -lh out/arch/arm64/boot/Image.gz
+          echo "=== Verifikasi Cap Biner Kernel ==="
           strings out/arch/arm64/boot/Image.gz | grep -m 1 -E "Linux version"
           strings out/arch/arm64/boot/Image.gz | grep -m 1 -E "Sakura clang"
 
