@@ -51,7 +51,7 @@ jobs:
           chmod +x antman
 
           ./antman -S=03062026
-
+          ./antman --patch=glibc
           echo "$HOME/toolchains/neutron-clang/bin" >> "$GITHUB_PATH"
 
       - name: Verify compiler
