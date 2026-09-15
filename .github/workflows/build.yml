@@ -8,6 +8,10 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
+
+      # ============================================================
+      # CHECKOUT KERNEL SOURCE
+      # ============================================================
       - name: Checkout kernel source
         uses: actions/checkout@v4
         with:
@@ -15,72 +19,138 @@ jobs:
           ref: dev
           fetch-depth: 1
 
+      # ============================================================
+      # CHECKOUT BUILDER FILES
+      # ============================================================
       - name: Checkout builder files
         uses: actions/checkout@v4
         with:
           path: builder
 
+      # ============================================================
+      # INSTALL MB56 DEFCONFIG
+      # ============================================================
       - name: Install MB56 defconfig
         run: |
-          cp builder/configs/mb56_defconfig arch/arm64/configs/mb56_defconfig
-          echo "MB56 defconfig installed:"
-          grep '^CONFIG_LOCALVERSION=' arch/arm64/configs/mb56_defconfig
+          cp builder/configs/mb56_defconfig \
+            arch/arm64/configs/mb56_defconfig
 
+          echo "MB56 defconfig installed:"
+          grep '^CONFIG_LOCALVERSION=' \
+            arch/arm64/configs/mb56_defconfig
+
+      # ============================================================
+      # INSTALL DEPENDENCIES
+      # ============================================================
       - name: Install dependencies
         run: |
           sudo apt-get update
+
           sudo apt-get install -y \
-            bc bison flex build-essential clang lld llvm \
-            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
-            libssl-dev libelf-dev libncurses5-dev libncurses-dev \
-            python3 cmake ninja-build python3-pip zip unzip cpio rsync git curl wget pahole
+            bc \
+            bison \
+            flex \
+            build-essential \
+            clang \
+            lld \
+            llvm \
+            gcc-aarch64-linux-gnu \
+            binutils-aarch64-linux-gnu \
+            libssl-dev \
+            libelf-dev \
+            libncurses5-dev \
+            libncurses-dev \
+            python3 \
+            cmake \
+            ninja-build \
+            python3-pip \
+            zip \
+            unzip \
+            cpio \
+            rsync \
+            git \
+            curl \
+            wget \
+            pahole
 
-      - name: Install AArch64 GCC
+      # ============================================================
+      # VERIFY AARCH64 GCC
+      # ============================================================
+      - name: Verify AArch64 GCC
         run: |
-          sudo apt-get install -y gcc-aarch64-linux-gnu
+          aarch64-linux-gnu-gcc --version
 
+      # ============================================================
+      # CACHE LLVM 24
+      # ============================================================
       - name: Cache LLVM 24
+        id: llvm-cache
         uses: actions/cache@v4
         with:
           path: |
             ${{ github.workspace }}/prebuilts/clang/host/linux-x86/llvm24
-            ${{ github.workspace }}/llvm-project/build
           key: llvm24-598f15297528855682dcf381575a9c14a7faabc3-${{ runner.os }}
 
+      # ============================================================
+      # BUILD LLVM 24 ONLY WHEN CACHE MISS
+      # ============================================================
       - name: Build LLVM 24
+        if: steps.llvm-cache.outputs.cache-hit != 'true'
         run: |
           git clone https://github.com/llvm/llvm-project.git llvm-project
+
           cd llvm-project
+
           git checkout 598f15297528855682dcf381575a9c14a7faabc3
+
           cmake -S llvm -B build \
             -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DLLVM_ENABLE_PROJECTS="clang;lld" \
             -DLLVM_TARGETS_TO_BUILD="AArch64;ARM;X86" \
             -DLLVM_ENABLE_TERMINFO=OFF
+
           cmake --build build -j"$(nproc)"
-          mkdir -p "$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/llvm24/bin"
-          cp build/bin/clang* \
-            "$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/llvm24/bin/"
-          cp build/bin/ld.lld \
-            "$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/llvm24/bin/"
-          cp build/bin/llvm-* \
+
+          mkdir -p \
+            "$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/llvm24/bin"
+
+          mkdir -p \
+            "$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/llvm24/lib"
+
+          cp -a build/bin/. \
             "$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/llvm24/bin/"
 
+          if [ -d build/lib/clang ]; then
+            cp -a build/lib/clang \
+              "$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/llvm24/lib/"
+          fi
+
+      # ============================================================
+      # VERIFY LLVM 24
+      # ============================================================
       - name: Verify LLVM 24
         run: |
-          export CLANG="$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/llvm24/bin"
-          "$CLANG/clang" --version
-          "$CLANG/ld.lld" --version
-          "$CLANG/llvm-ar" --version
-          "$CLANG/llvm-nm" --version
-          "$CLANG/llvm-objcopy" --version
-          "$CLANG/llvm-objdump" --version
-          "$CLANG/llvm-size" --version
-          "$CLANG/llvm-strip" --version
+          export LLVM_PATH="$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/llvm24/bin"
 
-      - name: Verify kernel base
+          test -x "$LLVM_PATH/clang"
+          test -x "$LLVM_PATH/ld.lld"
+          test -x "$LLVM_PATH/llvm-ar"
+          test -x "$LLVM_PATH/llvm-nm"
+          test -x "$LLVM_PATH/llvm-objcopy"
+          test -x "$LLVM_PATH/llvm-objdump"
+          test -x "$LLVM_PATH/llvm-size"
+          test -x "$LLVM_PATH/llvm-strip"
+
+          "$LLVM_PATH/clang" --version
+          "$LLVM_PATH/ld.lld" --version
+
+      # ============================================================
+      # VERIFY KERNEL BASE VERSION
+      # ============================================================
+      - name: Verify kernel base version
         run: |
+          echo "Kernel version:"
           grep -E '^(VERSION|PATCHLEVEL|SUBLEVEL|EXTRAVERSION)' Makefile
 
           echo "CIP:"
@@ -89,38 +159,54 @@ jobs:
           echo "ST:"
           cat localversion-st
 
-          echo "Expected base version:"
-          echo "4.19.325-cip136-st20"
-
+      # ============================================================
+      # SETUP RESUKISU
+      # ============================================================
       - name: Setup ReSukiSU
         run: |
           curl -LSs \
             "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" \
             | bash
 
+      # ============================================================
+      # SETUP NOMOUNT
+      # ============================================================
       - name: Setup NoMount
         run: |
           curl -LSs \
             "https://raw.githubusercontent.com/maxsteeel/nomount/v2.0.0/kernel/setup.sh" \
             | bash -s v2.0.0
 
+      # ============================================================
+      # VERIFY MB56 CONFIG
+      # ============================================================
       - name: Verify MB56 config
         run: |
           echo "Using MB56 config with #ice bear++ branding"
-          grep '^CONFIG_LOCALVERSION=' arch/arm64/configs/mb56_defconfig
+
+          grep '^CONFIG_LOCALVERSION=' \
+            arch/arm64/configs/mb56_defconfig
+
           echo -n "CIP = "
           cat localversion-cip
+
           echo -n "ST  = "
           cat localversion-st
 
+      # ============================================================
+      # PREPARE KERNEL CONFIG
+      # ============================================================
       - name: Prepare kernel config
         run: |
           export ARCH=arm64
           export SUBARCH=arm64
+
           export PATH="$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/llvm24/bin:$PATH"
+
           export LLVM=1
           export LLVM_IAS=1
           export CROSS_COMPILE=aarch64-linux-gnu-
+
           export LD=ld.lld
           export AR=llvm-ar
           export NM=llvm-nm
@@ -130,22 +216,28 @@ jobs:
           export STRIP=llvm-strip
 
           mkdir -p out
+
           make O=out ARCH=arm64 mb56_defconfig
+
           make O=out ARCH=arm64 olddefconfig
 
-          echo "=== Final MB56 configuration ==="
-          grep -E 'CONFIG_(LOCALVERSION|LOCALVERSION_AUTO|KSU|KSU_MANUAL_HOOK|NOMOUNT|CLANG_VERSION|LLD_VERSION|LTO_CLANG|THINLTO|RELR)' out/.config || true
+          echo "Final kernel release:"
+          make O=out ARCH=arm64 kernelrelease
 
-          echo "=== Kernel release ==="
-          make -s --no-print-directory             O=out ARCH=arm64 kernelrelease
-
+      # ============================================================
+      # VERIFY RESUKISU MANUAL HOOK
+      # ============================================================
       - name: Verify ReSukiSU Manual Hook
         run: |
           grep -q '^CONFIG_KSU=y' out/.config
           grep -q '^CONFIG_KSU_MANUAL_HOOK=y' out/.config
 
-          echo "ReSukiSU Manual Hook: OK"
+          echo "ReSukiSU: OK"
+          echo "Manual Hook: OK"
 
+      # ============================================================
+      # VERIFY NOMOUNT
+      # ============================================================
       - name: Verify NoMount
         run: |
           test -d fs/nomount
@@ -154,27 +246,20 @@ jobs:
 
           echo "NoMount: OK"
 
-      - name: Verify kernel version string
+      # ============================================================
+      # VERIFY EXACT KERNEL VERSION
+      # ============================================================
+      - name: Verify exact kernel version
         run: |
-          VERSION="$(make -s --no-print-directory \
-            O=out ARCH=arm64 kernelrelease \
-            | grep -E '^[0-9]' \
-            | tr -d '\r\n')"
+          VERSION="$(make O=out ARCH=arm64 kernelrelease)"
 
-          echo "Actual:"
-          echo "$VERSION"
+          echo "Kernel release: $VERSION"
 
-          echo "Expected:"
-          echo "4.19.325-cip136-st20-#ice bear++"
+          test "$VERSION" = "4.19.325-cip136-st20-#ice bear++"
 
-          if [ "$VERSION" != "4.19.325-cip136-st20-#ice bear++" ]; then
-            echo "ERROR: Kernel version mismatch!"
-            echo "Actual: $VERSION"
-            exit 1
-          fi
-
-          echo "VERSION CHECK: PASS"
-
+      # ============================================================
+      # BUILD KERNEL
+      # ============================================================
       - name: Build kernel
         run: |
           export ARCH=arm64
@@ -184,10 +269,8 @@ jobs:
 
           export LLVM=1
           export LLVM_IAS=1
-
           export CROSS_COMPILE=aarch64-linux-gnu-
 
-          export CC=clang
           export LD=ld.lld
           export AR=llvm-ar
           export NM=llvm-nm
@@ -202,57 +285,34 @@ jobs:
             LLVM=1 \
             LLVM_IAS=1 \
             CROSS_COMPILE=aarch64-linux-gnu- \
-            Image.gz dtbs
+            Image.gz \
+            dtbs
 
-      - name: Find kernel image
+      # ============================================================
+      # VERIFY IMAGE
+      # ============================================================
+      - name: Verify kernel image
         run: |
-          if [ -f out/arch/arm64/boot/Image.gz ]; then
-            cp out/arch/arm64/boot/Image.gz Image.gz
+          test -f out/arch/arm64/boot/Image.gz
 
-          elif [ -f out/arch/arm64/boot/Image ]; then
-            cp out/arch/arm64/boot/Image Image
+          echo "Image.gz:"
+          ls -lh out/arch/arm64/boot/Image.gz
 
-          else
-            echo "ERROR: Kernel image not found!"
+          echo "DTBs:"
+          find out/arch/arm64/boot/dts -type f -name "*.dtb" -print
 
-            find out/arch/arm64/boot \
-              -maxdepth 2 \
-              -type f \
-              -print
-
-            exit 1
-          fi
-
-      - name: Verify kernel build
+      # ============================================================
+      # CLONE ANYKERNEL3
+      # ============================================================
+      - name: Clone AnyKernel3
         run: |
-          echo "=== Kernel release ==="
-
-          make -s --no-print-directory \
-            O=out ARCH=arm64 kernelrelease
-
-          echo "=== Kernel version ==="
-
-          make -s --no-print-directory \
-            O=out ARCH=arm64 kernelversion
-
-          echo "=== Kernel image ==="
-
-          ls -lh Image* 2>/dev/null || true
-
-          echo "=== Important config ==="
-
-          grep -E \
-            'CONFIG_(LOCALVERSION|LOCALVERSION_AUTO|KSU|KSU_MANUAL_HOOK|NOMOUNT)' \
-            out/.config || true
-
-      - name: Prepare AnyKernel3
-        run: |
-          git clone --depth=1 \
+          git clone \
             https://github.com/osm0sis/AnyKernel3.git \
             anykernel
 
-          rm -rf anykernel/.git
-
+      # ============================================================
+      # CONFIGURE ANYKERNEL3
+      # ============================================================
       - name: Configure AnyKernel3
         run: |
           cat > anykernel/anykernel.sh <<'EOF'
@@ -303,117 +363,62 @@ jobs:
           flash_boot;
           EOF
 
-      - name: Copy kernel to AnyKernel3
+      # ============================================================
+      # COPY KERNEL IMAGE
+      # ============================================================
+      - name: Copy kernel image
         run: |
-          if [ -f Image.gz ]; then
-            cp Image.gz anykernel/Image.gz
+          cp out/arch/arm64/boot/Image.gz \
+            anykernel/Image.gz
 
-          elif [ -f Image ]; then
-            cp Image anykernel/Image
+      # ============================================================
+      # CREATE PLACEHOLDER DIRECTORIES
+      # ============================================================
+      - name: Prepare AnyKernel directories
+        run: |
+          mkdir -p anykernel/modules
+          mkdir -p anykernel/patch
+          mkdir -p anykernel/ramdisk
 
-          else
-            echo "ERROR: Image/Image.gz missing"
-            exit 1
-          fi
+          touch anykernel/modules/.placeholder
+          touch anykernel/patch/.placeholder
+          touch anykernel/ramdisk/.placeholder
 
+      # ============================================================
+      # REMOVE UNNECESSARY FILES
+      # ============================================================
       - name: Clean AnyKernel3 package
         run: |
-          cd anykernel
+          rm -rf anykernel/.git
+          rm -rf anykernel/.github
+          rm -f anykernel/LICENSE
+          rm -f anykernel/README.md
 
-          rm -rf .github
-          rm -f LICENSE
-          rm -f README.md
-          rm -f ZAUKSK_BUILD_INFO.txt
-
-          echo "=== Final AnyKernel3 files ==="
-
-          find . -maxdepth 2 -type f | sort
-
+      # ============================================================
+      # CREATE FLASHABLE ZIP
+      # ============================================================
       - name: Create flashable ZIP
         run: |
-          ZIP_NAME="ice-bear-ReSukiSU-CIP136-ST20-gale.zip"
-
           cd anykernel
 
-          rm -f "../$ZIP_NAME"
-
-          FILES=(
-            "META-INF"
-            "modules"
-            "patch"
-            "ramdisk"
-            "tools"
-            "anykernel.sh"
-            "banner"
-          )
-
-          if [ -f Image.gz ]; then
-            FILES+=("Image.gz")
-
-          elif [ -f Image ]; then
-            FILES+=("Image")
-
-          else
-            echo "ERROR: Image/Image.gz missing"
-            exit 1
-          fi
-
-          zip -r9 "../$ZIP_NAME" "${FILES[@]}"
+          zip -r9 \
+            ../ice-bear-ReSukiSU-CIP136-ST20-gale.zip \
+            . \
+            -x "*.git*" \
+            -x "README.md" \
+            -x "LICENSE"
 
           cd ..
 
-          test -f "$ZIP_NAME"
+          ls -lh \
+            ice-bear-ReSukiSU-CIP136-ST20-gale.zip
 
-          echo "=== Flashable ZIP ==="
-          ls -lh "$ZIP_NAME"
-
-      - name: Validate final ZIP
-        run: |
-          ZIP="ice-bear-ReSukiSU-CIP136-ST20-gale.zip"
-
-          test -f "$ZIP"
-
-          echo "=== ZIP contents ==="
-
-          unzip -l "$ZIP"
-
-          echo "=== Required files ==="
-
-          unzip -l "$ZIP" | grep -E \
-            'META-INF/|modules/|patch/|ramdisk/|tools/|anykernel.sh|banner|Image.gz|Image'
-
-          echo "ZIP VALIDATION: PASS"
-
-      - name: Generate SHA256
-        run: |
-          sha256sum \
-            ice-bear-ReSukiSU-CIP136-ST20-gale.zip \
-            > SHA256SUMS.txt
-
-          cat SHA256SUMS.txt
-
+      # ============================================================
+      # UPLOAD FLASHABLE ZIP
+      # ============================================================
       - name: Upload flashable ZIP
         uses: actions/upload-artifact@v4
         with:
           name: ice-bear-ReSukiSU-CIP136-ST20-gale-FLASHABLE
-          path: |
-            ice-bear-ReSukiSU-CIP136-ST20-gale.zip
-            SHA256SUMS.txt
-
-      - name: Complete
-        run: |
-          echo "========================================"
-          echo "BUILD SUCCESS"
-          echo "========================================"
-
-          echo "Kernel:"
-          make -s --no-print-directory \
-            O=out ARCH=arm64 kernelrelease
-
-          echo "Expected:"
-          echo "4.19.325-cip136-st20-#ice bear++"
-
-          echo "ZIP:"
-          echo "ice-bear-ReSukiSU-CIP136-ST20-gale.zip"
-
-          echo "========================================"
+          path: ice-bear-ReSukiSU-CIP136-ST20-gale.zip
+          if-no-files-found: error
