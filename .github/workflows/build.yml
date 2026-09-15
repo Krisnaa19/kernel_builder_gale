@@ -183,20 +183,6 @@ jobs:
           echo "MB56 + ReSukiSU Manual Hook + NoMount + ThinLTO verified."
 
       # ============================================================
-      # VERIFY EXACT KERNEL VERSION
-      # ============================================================
-      - name: Verify exact kernel version
-        run: |
-          set -e
-
-          test -f out/include/config/kernel.release
-
-          VERSION="$(cat out/include/config/kernel.release)"
-          echo "Kernel release: $VERSION"
-
-          test "$VERSION" = "4.19.325-cip136-st20-#ice bear++"
-
-      # ============================================================
       # BUILD KERNEL
       # ============================================================
       - name: Build kernel
@@ -229,6 +215,21 @@ jobs:
             CROSS_COMPILE_COMPAT=arm-linux-gnueabi- \
             Image.gz \
             dtbs
+
+      # ============================================================
+      # VERIFY EXACT KERNEL VERSION
+      # ============================================================
+      - name: Verify exact kernel version
+        run: |
+          set -e
+
+          VERSION="$(make -s O=out ARCH=arm64 kernelrelease)"
+          echo "Kernel release: $VERSION"
+
+          test "$VERSION" = "4.19.325-cip136-st20-#ice bear++"
+
+          test -f out/include/config/kernel.release
+          test "$(cat out/include/config/kernel.release)" = "$VERSION"
 
       # ============================================================
       # VERIFY KERNEL IMAGE
