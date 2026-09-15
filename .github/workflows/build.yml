@@ -8,6 +8,9 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
+      # ============================================================
+      # CHECKOUT KERNEL SOURCE
+      # ============================================================
       - name: Checkout kernel source
         uses: actions/checkout@v4
         with:
@@ -15,6 +18,33 @@ jobs:
           ref: dev
           fetch-depth: 1
 
+      # ============================================================
+      # CHECKOUT BUILDER FILES
+      # ============================================================
+      - name: Checkout builder files
+        uses: actions/checkout@v4
+        with:
+          repository: Krisnaa19/kernel_builder_gale
+          ref: main
+          path: builder
+          fetch-depth: 1
+
+      # ============================================================
+      # INSTALL MB56 DEFCONFIG
+      # ============================================================
+      - name: Install MB56 defconfig
+        run: |
+          set -e
+          test -f builder/configs/mb56_defconfig
+          cp builder/configs/mb56_defconfig \
+            arch/arm64/configs/mb56_defconfig
+
+          grep '^CONFIG_LOCALVERSION=' \
+            arch/arm64/configs/mb56_defconfig
+
+      # ============================================================
+      # INSTALL DEPENDENCIES
+      # ============================================================
       - name: Install dependencies
         run: |
           set -e
@@ -23,11 +53,14 @@ jobs:
             bc \
             bison \
             flex \
+            build-essential \
             cpio \
             libssl-dev \
             libelf-dev \
             libdw-dev \
+            libncurses-dev \
             dwarves \
+            pahole \
             rsync \
             zip \
             unzip \
@@ -35,8 +68,16 @@ jobs:
             wget \
             curl \
             git \
-            ninja-build
+            ninja-build \
+            patchelf \
+            gcc-aarch64-linux-gnu \
+            binutils-aarch64-linux-gnu \
+            gcc-arm-linux-gnueabi \
+            binutils-arm-linux-gnueabi
 
+      # ============================================================
+      # INSTALL NEUTRON CLANG 23
+      # ============================================================
       - name: Install Neutron Clang 23
         run: |
           set -e
@@ -52,44 +93,80 @@ jobs:
 
           ./antman -S=03062026
           ./antman --patch=glibc
+
           echo "$HOME/toolchains/neutron-clang/bin" >> "$GITHUB_PATH"
 
-      - name: Verify compiler
+      # ============================================================
+      # VERIFY TOOLCHAIN
+      # ============================================================
+      - name: Verify toolchain
         run: |
           set -e
+
           clang --version
           ld.lld --version
+          aarch64-linux-gnu-gcc --version
           aarch64-linux-gnu-ld --version
+          arm-linux-gnueabi-gcc --version
+          arm-linux-gnueabi-ld --version
 
+      # ============================================================
+      # SETUP RESUKISU MANUAL HOOK
+      # ============================================================
       - name: Setup ReSukiSU Manual Hook
         run: |
           set -e
 
           curl -LSs \
-            https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh \
+            "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" \
             | bash
 
+      # ============================================================
+      # SETUP NOMOUNT V2.0.0
+      # ============================================================
       - name: Setup NoMount v2.0.0
         run: |
           set -e
 
           curl -LSs \
-            https://raw.githubusercontent.com/maxsteeel/nomount/v2.0.0/kernel/setup.sh \
+            "https://raw.githubusercontent.com/maxsteeel/nomount/v2.0.0/kernel/setup.sh" \
             | bash -s v2.0.0
 
-      - name: Prepare MB56 defconfig
+      # ============================================================
+      # PREPARE KERNEL CONFIG
+      # ============================================================
+      - name: Prepare MB56 kernel config
         run: |
           set -e
 
-          mkdir -p arch/arm64/configs
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export PATH="$HOME/toolchains/neutron-clang/bin:$PATH"
 
-          cat > arch/arm64/configs/mb56_defconfig <<'EOF'
-          CONFIG_LOCALVERSION="-#ice bear++"
-          EOF
+          export LLVM=1
+          export LLVM_IAS=1
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CROSS_COMPILE_COMPAT=arm-linux-gnueabi-
+          export LD=ld.lld
+          export AR=llvm-ar
+          export NM=llvm-nm
+          export OBJCOPY=llvm-objcopy
+          export OBJDUMP=llvm-objdump
+          export OBJSIZE=llvm-size
+          export STRIP=llvm-strip
+
+          mkdir -p out
 
           make O=out ARCH=arm64 mb56_defconfig
+          make O=out ARCH=arm64 olddefconfig
 
-      - name: Verify required config
+          echo "Kernel release:"
+          make O=out ARCH=arm64 kernelrelease
+
+      # ============================================================
+      # VERIFY MB56 CONFIG
+      # ============================================================
+      - name: Verify MB56 config
         run: |
           set -e
 
@@ -99,39 +176,82 @@ jobs:
           grep -q '^CONFIG_KSU_MANUAL_HOOK_AUTO_INITRC_HOOK=y' out/.config
           grep -q '^CONFIG_KSU_MANUAL_HOOK_AUTO_INPUT_HOOK=y' out/.config
           grep -q '^CONFIG_NOMOUNT=y' out/.config
+          grep -q '^CONFIG_THINLTO=y' out/.config
+          grep -q '^CONFIG_LLVM_POLLY=y' out/.config
+          grep -q '^CONFIG_LOCALVERSION="-#ice bear++"' arch/arm64/configs/mb56_defconfig
 
-          echo "Required config verified."
+          echo "MB56 + ReSukiSU Manual Hook + NoMount + ThinLTO verified."
 
+      # ============================================================
+      # VERIFY EXACT KERNEL VERSION
+      # ============================================================
+      - name: Verify exact kernel version
+        run: |
+          set -e
+
+          test -f out/include/config/kernel.release
+
+          VERSION="$(cat out/include/config/kernel.release)"
+          echo "Kernel release: $VERSION"
+
+          test "$VERSION" = "4.19.325-cip136-st20-#ice bear++"
+
+      # ============================================================
+      # BUILD KERNEL
+      # ============================================================
       - name: Build kernel
         run: |
           set -e
 
+          export ARCH=arm64
+          export SUBARCH=arm64
           export PATH="$HOME/toolchains/neutron-clang/bin:$PATH"
+
+          export LLVM=1
+          export LLVM_IAS=1
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CROSS_COMPILE_COMPAT=arm-linux-gnueabi-
+          export LD=ld.lld
+          export AR=llvm-ar
+          export NM=llvm-nm
+          export OBJCOPY=llvm-objcopy
+          export OBJDUMP=llvm-objdump
+          export OBJSIZE=llvm-size
+          export STRIP=llvm-strip
 
           make -j"$(nproc)" \
             O=out \
             ARCH=arm64 \
-            CC=clang \
             LLVM=1 \
             LLVM_IAS=1 \
+            LTO=thin \
             CROSS_COMPILE=aarch64-linux-gnu- \
-            CROSS_COMPILE_COMPAT=arm-linux-gnueabi-
+            CROSS_COMPILE_COMPAT=arm-linux-gnueabi- \
+            Image.gz \
+            dtbs
 
-      - name: Verify kernel
+      # ============================================================
+      # VERIFY KERNEL IMAGE
+      # ============================================================
+      - name: Verify kernel image
         run: |
           set -e
 
           test -f out/arch/arm64/boot/Image.gz
 
-          test -f out/include/config/kernel.release
+          echo "Image.gz:"
+          ls -lh out/arch/arm64/boot/Image.gz
 
-          VERSION="$(cat out/include/config/kernel.release)"
+          echo "DTBs:"
+          find out/arch/arm64/boot/dts \
+            -type f \
+            -name "*.dtb" \
+            -print
 
-          echo "Kernel release: $VERSION"
-
-          test "$VERSION" = "4.19.325-cip136-st20-#ice bear++"
-
-      - name: Prepare AnyKernel3
+      # ============================================================
+      # CLONE ANYKERNEL3
+      # ============================================================
+      - name: Clone AnyKernel3
         run: |
           set -e
 
@@ -139,10 +259,12 @@ jobs:
             https://github.com/osm0sis/AnyKernel3.git \
             AnyKernel3
 
-          rm -rf AnyKernel3/.git
-
-          cp out/arch/arm64/boot/Image.gz \
-            AnyKernel3/Image.gz
+      # ============================================================
+      # CONFIGURE ANYKERNEL3
+      # ============================================================
+      - name: Configure AnyKernel3
+        run: |
+          set -e
 
           cat > AnyKernel3/anykernel.sh <<'EOF'
           ### AnyKernel3 Ramdisk Mod Script
@@ -192,6 +314,39 @@ jobs:
           flash_boot;
           EOF
 
+      # ============================================================
+      # COPY KERNEL IMAGE
+      # ============================================================
+      - name: Copy kernel image
+        run: |
+          set -e
+
+          cp out/arch/arm64/boot/Image.gz \
+            AnyKernel3/Image.gz
+
+      # ============================================================
+      # PREPARE ANYKERNEL3
+      # ============================================================
+      - name: Prepare AnyKernel3
+        run: |
+          set -e
+
+          mkdir -p AnyKernel3/modules
+          mkdir -p AnyKernel3/patch
+          mkdir -p AnyKernel3/ramdisk
+
+          touch AnyKernel3/modules/.placeholder
+          touch AnyKernel3/patch/.placeholder
+          touch AnyKernel3/ramdisk/.placeholder
+
+          rm -rf AnyKernel3/.git
+          rm -rf AnyKernel3/.github
+          rm -f AnyKernel3/LICENSE
+          rm -f AnyKernel3/README.md
+
+      # ============================================================
+      # CREATE FLASHABLE ZIP
+      # ============================================================
       - name: Create flashable ZIP
         run: |
           set -e
@@ -201,20 +356,31 @@ jobs:
           zip -r9 \
             ../#ice-bear++-MB56-gale.zip \
             . \
-            -x '*.git*' 'README.md'
+            -x '*.git*' \
+            -x 'README.md' \
+            -x 'LICENSE'
 
+          cd ..
+
+          test -f "#ice-bear++-MB56-gale.zip"
+          ls -lh "#ice-bear++-MB56-gale.zip"
+
+      # ============================================================
+      # VERIFY ZIP
+      # ============================================================
       - name: Verify ZIP
         run: |
           set -e
 
-          test -f "#ice-bear++-MB56-gale.zip"
-
           unzip -t "#ice-bear++-MB56-gale.zip"
 
-          ls -lh "#ice-bear++-MB56-gale.zip"
-
+      # ============================================================
+      # UPLOAD FLASHABLE ZIP
+      # ============================================================
       - name: Upload kernel ZIP
         uses: actions/upload-artifact@v4
         with:
-          name: ice-bear-MB56-gale
+          name: ice-bear-MB56-gale-FLASHABLE
           path: "#ice-bear++-MB56-gale.zip"
+          if-no-files-found: error
+          
