@@ -9,7 +9,7 @@ jobs:
       - name: Checkout kernel source (Authentic Branch dev)
         uses: actions/checkout@v4
         with:
-          repository: Krisnaa19/android_kernel_xiaomi_gale
+          repository: xxblebleblexx/android_kernel_xiaomi_gale
           ref: dev
           fetch-depth: 1
 
